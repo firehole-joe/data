@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Distributor extends Model
 {
@@ -53,5 +54,13 @@ class Distributor extends Model
     public function feedRuns(): HasMany
     {
         return $this->hasMany(FeedRun::class);
+    }
+
+    /**
+     * The most recent ingestion run for this distributor.
+     */
+    public function latestFeedRun(): HasOne
+    {
+        return $this->hasOne(FeedRun::class)->latestOfMany();
     }
 }

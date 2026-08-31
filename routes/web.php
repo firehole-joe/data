@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SupplyReportController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -7,12 +8,9 @@ use Illuminate\Support\Facades\Route;
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| Here is where you can register web routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "web" middleware group. Make something great!
+| The 2026 Ammunition Supply Report dashboard for data.firehole.com.
 |
 */
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', [SupplyReportController::class, 'index'])->name('supply.index');
+Route::get('/distributors', [SupplyReportController::class, 'distributors'])->name('supply.distributors');
