@@ -25,12 +25,15 @@ class PriceHistory extends Model
     /**
      * The attributes that should be cast.
      *
+     * `recorded_date` is deliberately left uncast: it is a calendar day
+     * (not a moment) used as part of a unique key, so it is stored and
+     * compared as a plain `Y-m-d` string across every database driver.
+     *
      * @var array<string, string>
      */
     protected $casts = [
         'wholesale_price' => 'decimal:2',
         'quantity_available' => 'integer',
-        'recorded_date' => 'date',
     ];
 
     /**

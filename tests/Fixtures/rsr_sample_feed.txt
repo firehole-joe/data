@@ -1,0 +1,7 @@
+RSR-AE223;604544617375;FED AE 223 55GR FMJ 20RD;18;FDRL;12.99;7.50;0.90;340;AE223J;Federal;AE223J;;Federal American Eagle .223 Rem 55gr FMJ 20-round box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RSR-WIN9;020892212602;WIN USA 9MM 115GR FMJ 50RD;18;WIN;18.49;9.25;1.10;125;Q4172;Winchester;Q4172;;Winchester USA 9mm Luger 115gr FMJ 50-round box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RSR-CCI22;076683000361;CCI MINI-MAG 22LR 40GR 100RD;18;CCI;9.99;5.10;0.50;0;0030;CCI;0030;;CCI Mini-Mag .22LR 40gr CPRN 100-round box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RSR-SHORTUPC; 8-901234 ;HORNADY 6.5CM 140GR ELD 20RD;18;HRDY;27.99;16.75;1.30;58;81496;Hornady;81496;;Hornady Match 6.5 Creedmoor 140gr ELD Match 20-round box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RSR-FEDHST;604544678970;FED HST 9MM 124GR JHP 50RD;18;FDRL;41.99;24.50;1.20;73;P9HST3;Federal;P9HST3;;Federal Premium HST 9mm 124gr JHP 50-round box;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;36.99;;;;;;;
+RSR-GLOCK19;764503022630;GLOCK 19 GEN5 9MM 15RD;1;GLK;599.00;449.00;30.0;12;PA195S201;Glock;PA195S201;;Glock 19 Gen5 9mm Luger 15-round pistol;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RSR-VORTEX;875874009913;VORTEX STRIKE EAGLE 1-8X24;8;VTX;599.99;399.99;20.0;45;SE-1824-1;Vortex;SE-1824-1;;Vortex Strike Eagle 1-8x24 riflescope;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
