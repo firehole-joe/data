@@ -57,6 +57,15 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
         return 'http_csv';
     }
 
+    /**
+     * Default port to use when connection_settings omits one. Null keeps
+     * the transport's own convention (SFTP 22, FTP 21).
+     */
+    protected function defaultPort(): ?int
+    {
+        return null;
+    }
+
     protected function expectsHeaderRow(): bool
     {
         return true;
@@ -176,8 +185,8 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
 
         try {
             return match ($transport) {
-                'sftp' => $this->sftpFilesystem($settings)->directoryExists($this->directoryOf($this->remotePath($settings))),
-                'ftp', 'ftps' => $this->ftpFilesystem($settings)->directoryExists($this->directoryOf($this->remotePath($settings))),
+                'sftp' => $this->probeFilesystem($this->sftpFilesystem($settings), $settings),
+                'ftp', 'ftps' => $this->probeFilesystem($this->ftpFilesystem($settings), $settings),
                 'http', 'https', 'http_csv', 'rest_api', 'api' => $this->httpRequest($settings)->head($this->httpUrl($settings))->successful(),
                 default => false,
             };
@@ -643,7 +652,7 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
             password: isset($settings['password']) ? (string) $settings['password'] : null,
             privateKey: $settings['private_key'] ?? null,
             passphrase: $settings['passphrase'] ?? null,
-            port: (int) ($settings['port'] ?? 22),
+            port: (int) ($settings['port'] ?? $this->defaultPort() ?? 22),
             timeout: (int) ($settings['timeout'] ?? 30),
         );
 
@@ -659,7 +668,7 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
             'host' => (string) ($settings['host'] ?? ''),
             'username' => (string) ($settings['username'] ?? ''),
             'password' => (string) ($settings['password'] ?? ''),
-            'port' => (int) ($settings['port'] ?? 21),
+            'port' => (int) ($settings['port'] ?? $this->defaultPort() ?? 21),
             'root' => $this->baseDirectory($settings),
             'ssl' => (bool) ($settings['ssl'] ?? false),
             'passive' => (bool) ($settings['passive'] ?? true),
@@ -711,13 +720,17 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
     }
 
     /**
+     * Resolve the remote file path, falling back to the driver default
+     * when it is unset, blank, or just a bare "/".
+     *
      * @param  array<string, mixed>  $settings
      */
-    private function remotePath(array $settings): string
+    protected function remotePath(array $settings): string
     {
-        $path = (string) ($settings['remote_path'] ?? $settings['path'] ?? $this->defaultRemotePath());
+        $path = trim((string) ($settings['remote_path'] ?? $settings['path'] ?? ''));
+        $path = ltrim($path, '/');
 
-        return ltrim($path, '/');
+        return $path !== '' ? $path : ltrim($this->defaultRemotePath(), '/');
     }
 
     /**
@@ -751,6 +764,23 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
         $directory = trim(dirname($path), '.');
 
         return $directory === '' ? '.' : $directory;
+    }
+
+    /**
+     * A connection is considered healthy if the catalog file can be
+     * stat-ed, or failing that, if its containing directory lists.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    private function probeFilesystem(Filesystem $filesystem, array $settings): bool
+    {
+        $remotePath = $this->remotePath($settings);
+
+        if ($filesystem->fileExists($remotePath)) {
+            return true;
+        }
+
+        return $filesystem->directoryExists($this->directoryOf($remotePath));
     }
 
     private function log(): LoggerInterface

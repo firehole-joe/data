@@ -7,13 +7,25 @@ use App\Services\Feeds\DTOs\FeedItemDTO;
 /**
  * Feed driver for RSR Group.
  *
- * RSR publishes a semicolon-delimited, header-less, fixed-column
- * inventory file (historically `rsrinventory-new.txt`) over SFTP. Rows
- * are ~77 columns wide; only the ones this system needs are mapped, and
- * anything outside the ammunition department is discarded.
+ * RSR serves an SFTP account at `ftps.rsrgroup.com:2222`. The primary
+ * catalog is `rsrinventory-new.txt` — a semicolon-delimited, header-less,
+ * fixed-column file (~77 columns) refreshed every two hours that carries
+ * SKU, UPC, description, dealer price, inventory qty, MAP and department.
+ * A companion `IM-QTY-CSV.csv` delta refreshes every five minutes; point
+ * `connection_settings.remote_path` at it for near-real-time quantity
+ * pulls. Only Department 18 (Ammunition) rows are kept.
  */
 class RsrFeedDriver extends AbstractFeedDriver
 {
+    /** SFTP port RSR listens on. */
+    public const DEFAULT_PORT = 2222;
+
+    /** Primary catalog file, updated every two hours. */
+    public const CATALOG_FILE = 'rsrinventory-new.txt';
+
+    /** Fast quantity delta file, updated every five minutes. */
+    public const QUANTITY_DELTA_FILE = 'IM-QTY-CSV.csv';
+
     /** Zero-based column positions in the RSR inventory file. */
     private const COL_STOCK_NUMBER = 0;
 
@@ -50,9 +62,14 @@ class RsrFeedDriver extends AbstractFeedDriver
         return 'sftp';
     }
 
+    protected function defaultPort(): ?int
+    {
+        return self::DEFAULT_PORT;
+    }
+
     protected function defaultRemotePath(): string
     {
-        return 'rsrinventory-new.txt';
+        return self::CATALOG_FILE;
     }
 
     protected function expectsHeaderRow(): bool

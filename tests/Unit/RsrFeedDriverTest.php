@@ -5,6 +5,8 @@ namespace Tests\Unit;
 use App\Services\Feeds\Drivers\RsrFeedDriver;
 use App\Services\Feeds\DTOs\FeedItemDTO;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
+use ReflectionObject;
 
 class RsrFeedDriverTest extends TestCase
 {
@@ -25,12 +27,30 @@ class RsrFeedDriverTest extends TestCase
         return iterator_to_array((new RsrFeedDriver)->parseFeed($this->fixture), false);
     }
 
+    /**
+     * @param  array<int, mixed>  $args
+     */
+    private function callProtected(object $driver, string $method, array $args = []): mixed
+    {
+        $ref = new ReflectionMethod($driver, $method);
+        $ref->setAccessible(true);
+
+        return $ref->invokeArgs($driver, $args);
+    }
+
+    private function readPrivate(object $object, string $property): mixed
+    {
+        $prop = (new ReflectionObject($object))->getProperty($property);
+        $prop->setAccessible(true);
+
+        return $prop->getValue($object);
+    }
+
     public function test_it_yields_only_ammunition_rows(): void
     {
-        $skus = array_map(
-            static fn (FeedItemDTO $dto): string => $dto->distributor_sku,
-            $this->parse(),
-        );
+        $items = $this->parse();
+
+        $skus = array_map(static fn (FeedItemDTO $dto): string => $dto->distributor_sku, $items);
 
         $this->assertSame(
             ['RSR-AE223', 'RSR-WIN9', 'RSR-CCI22', 'RSR-SHORTUPC', 'RSR-FEDHST'],
@@ -38,6 +58,60 @@ class RsrFeedDriverTest extends TestCase
         );
         $this->assertNotContains('RSR-GLOCK19', $skus, 'handgun (dept 1) must be filtered out');
         $this->assertNotContains('RSR-VORTEX', $skus, 'optic (dept 8) must be filtered out');
+
+        // Every surviving row is Department 18 (Ammunition).
+        foreach ($items as $dto) {
+            $this->assertSame('18', $dto->raw_payload['department']);
+        }
+    }
+
+    public function test_it_defaults_to_sftp_port_2222(): void
+    {
+        $driver = new RsrFeedDriver;
+
+        $this->assertSame(2222, $this->callProtected($driver, 'defaultPort'));
+        $this->assertSame(2222, RsrFeedDriver::DEFAULT_PORT);
+        $this->assertSame('sftp', $this->callProtected($driver, 'defaultTransport'));
+    }
+
+    public function test_sftp_connection_provider_receives_port_2222_when_unspecified(): void
+    {
+        $driver = new RsrFeedDriver;
+
+        // host/user only — no explicit port.
+        $filesystem = $this->callProtected($driver, 'sftpFilesystem', [[
+            'host' => 'ftps.rsrgroup.com',
+            'username' => 'acct',
+        ]]);
+
+        $port = $this->readPrivate(
+            $this->readPrivate(
+                $this->readPrivate($filesystem, 'adapter'),
+                'connectionProvider',
+            ),
+            'port',
+        );
+
+        $this->assertSame(2222, $port);
+    }
+
+    public function test_remote_path_resolves_to_the_primary_catalog_file(): void
+    {
+        $driver = new RsrFeedDriver;
+
+        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'defaultRemotePath'));
+        $this->assertSame('rsrinventory-new.txt', RsrFeedDriver::CATALOG_FILE);
+
+        // Unspecified, blank, and a bare "/" all fall back to the catalog file.
+        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [[]]));
+        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '/']]));
+        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '   ']]));
+        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['path' => '']]));
+
+        // An explicit path (e.g. the fast quantity delta file) is honoured, minus any leading slash.
+        $this->assertSame('IM-QTY-CSV.csv', $this->callProtected($driver, 'remotePath', [['remote_path' => 'IM-QTY-CSV.csv']]));
+        $this->assertSame('feeds/custom.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '/feeds/custom.txt']]));
+        $this->assertSame('alt.txt', $this->callProtected($driver, 'remotePath', [['path' => 'alt.txt']]));
     }
 
     public function test_it_maps_delimited_columns_into_the_dto(): void
