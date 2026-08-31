@@ -1,0 +1,34 @@
+[
+    {
+        "sku": "PA-FED556",
+        "upc": "6045-4462 8567",
+        "mpn": "XM193",
+        "description": "Federal 5.56x45 XM193 55gr FMJ 20rd",
+        "instock_qty": 720,
+        "dealer_cost": "7.40"
+    },
+    {
+        "sku": "PA-BLZ9",
+        "upc": "076683902900",
+        "mpn": "5200",
+        "description": "Blazer Brass 9mm 115gr FMJ 50rd",
+        "instock_qty": 0,
+        "dealer_cost": 8.65
+    },
+    {
+        "sku": "PA-HOR300",
+        "upc": "090255810103",
+        "mpn": "81011",
+        "description": "Hornady BLACK 300 Blackout 110gr V-MAX 20rd",
+        "instock_qty": 140,
+        "dealer_cost": 18.9
+    },
+    {
+        "sku": "PA-SLX-1-6",
+        "upc": "818500019011",
+        "mpn": "PA-SLX-1-6-ACSS",
+        "description": "Primary Arms SLx 1-6x24 SFP Rifle Scope ACSS Raptor",
+        "instock_qty": 64,
+        "dealer_cost": 199.99
+    }
+]

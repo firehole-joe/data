@@ -3,6 +3,14 @@
 namespace Database\Seeders;
 
 use App\Models\Distributor;
+use App\Services\Feeds\Drivers\ChattanoogaFeedDriver;
+use App\Services\Feeds\Drivers\CrowFeedDriver;
+use App\Services\Feeds\Drivers\DavidsonsFeedDriver;
+use App\Services\Feeds\Drivers\LipseysFeedDriver;
+use App\Services\Feeds\Drivers\PrimaryArmsFeedDriver;
+use App\Services\Feeds\Drivers\RsrFeedDriver;
+use App\Services\Feeds\Drivers\SecondAmendmentFeedDriver;
+use App\Services\Feeds\Drivers\ZandersFeedDriver;
 use Illuminate\Database\Seeder;
 
 class DistributorSeeder extends Seeder
@@ -34,49 +42,49 @@ class DistributorSeeder extends Seeder
                 'name' => 'RSR Group',
                 'slug' => 'rsr',
                 'transport_type' => 'sftp',
-                'driver_class' => 'App\Services\Feeds\Drivers\RsrFeedDriver',
+                'driver_class' => RsrFeedDriver::class,
             ],
             [
                 'name' => 'Chattanooga Shooting Supplies',
                 'slug' => 'chattanooga',
                 'transport_type' => 'ftp',
-                'driver_class' => 'App\Services\Feeds\Drivers\ChattanoogaFeedDriver',
+                'driver_class' => ChattanoogaFeedDriver::class,
             ],
             [
                 'name' => 'Zanders Sporting Goods',
                 'slug' => 'zanders',
                 'transport_type' => 'http_csv',
-                'driver_class' => 'App\Services\Feeds\Drivers\ZandersFeedDriver',
+                'driver_class' => ZandersFeedDriver::class,
             ],
             [
                 'name' => "Lipsey's",
                 'slug' => 'lipseys',
                 'transport_type' => 'sftp',
-                'driver_class' => 'App\Services\Feeds\Drivers\LipseysFeedDriver',
+                'driver_class' => LipseysFeedDriver::class,
             ],
             [
                 'name' => 'Crow Shooting Supply',
                 'slug' => 'crow',
                 'transport_type' => 'ftp',
-                'driver_class' => 'App\Services\Feeds\Drivers\CrowFeedDriver',
+                'driver_class' => CrowFeedDriver::class,
             ],
             [
                 'name' => '2nd Amendment Wholesale',
                 'slug' => 'second_amendment',
                 'transport_type' => 'rest_api',
-                'driver_class' => 'App\Services\Feeds\Drivers\SecondAmendmentFeedDriver',
+                'driver_class' => SecondAmendmentFeedDriver::class,
             ],
             [
                 'name' => "Davidson's",
                 'slug' => 'davidsons',
                 'transport_type' => 'ftp',
-                'driver_class' => 'App\Services\Feeds\Drivers\DavidsonsFeedDriver',
+                'driver_class' => DavidsonsFeedDriver::class,
             ],
             [
                 'name' => 'Primary Arms Wholesale',
                 'slug' => 'primary_arms',
                 'transport_type' => 'rest_api',
-                'driver_class' => 'App\Services\Feeds\Drivers\PrimaryArmsFeedDriver',
+                'driver_class' => PrimaryArmsFeedDriver::class,
             ],
         ];
     }

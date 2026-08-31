@@ -1,0 +1,45 @@
+{
+    "meta": {
+        "generated_at": "2026-08-31T12:00:00Z",
+        "count": 4
+    },
+    "data": [
+        {
+            "sku": "2A-SPR9",
+            "upc": "604544617184",
+            "mpn": "GD9124",
+            "name": "Speer Gold Dot 9mm Luger 124gr JHP 20rd",
+            "wholesale_price": "14.20",
+            "quantity": 180,
+            "category": "Ammunition",
+            "map": "21.99"
+        },
+        {
+            "sku": "2A-FED556",
+            "upc": "6-04544 628567",
+            "mpn": "XM855",
+            "name": "Federal 5.56x45 XM855 62gr Green Tip 20rd",
+            "wholesale_price": 8.05,
+            "quantity": 0,
+            "category": "Ammunition"
+        },
+        {
+            "sku": "2A-HOR308",
+            "upc": "090255805031",
+            "mpn": "80503",
+            "name": "Hornady BLACK 308 Win 168gr A-MAX 20rd",
+            "wholesale_price": 21.5,
+            "quantity": 75,
+            "category": "Rifle Ammunition"
+        },
+        {
+            "sku": "2A-VTX-SE",
+            "upc": "875874007542",
+            "mpn": "SE-1624-2",
+            "name": "Vortex Strike Eagle 1-6x24 SFP Riflescope AR-BDC3",
+            "wholesale_price": 289.0,
+            "quantity": 33,
+            "category": "Optics"
+        }
+    ]
+}
