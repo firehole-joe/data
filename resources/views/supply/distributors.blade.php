@@ -20,6 +20,7 @@
                 <x-ui.table.th>Last Synced</x-ui.table.th>
                 <x-ui.table.th>Latest Feed Run</x-ui.table.th>
                 <x-ui.table.th numeric>Products Tracked</x-ui.table.th>
+                <x-ui.table.th>Actions</x-ui.table.th>
             </x-ui.table.tr>
         </x-ui.table.thead>
         <x-ui.table.tbody>
@@ -75,10 +76,34 @@
                     </x-ui.table.td>
 
                     <x-ui.table.td numeric>{{ number_format($distributor['products_tracked']) }}</x-ui.table.td>
+
+                    <x-ui.table.td>
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <x-ui.button
+                                :href="route('distributors.edit', $distributor['slug'])"
+                                variant="outline"
+                                size="xs"
+                            >Edit Credentials</x-ui.button>
+
+                            <form method="POST" action="{{ route('distributors.test', $distributor['slug']) }}">
+                                @csrf
+                                <x-ui.button type="submit" variant="ghost" size="xs">Test Connection</x-ui.button>
+                            </form>
+
+                            <form
+                                method="POST"
+                                action="{{ route('distributors.sync', $distributor['slug']) }}"
+                                onsubmit="return confirm('Run a full sync for {{ $distributor['name'] }} now?');"
+                            >
+                                @csrf
+                                <x-ui.button type="submit" variant="ghost" size="xs">Sync Now</x-ui.button>
+                            </form>
+                        </div>
+                    </x-ui.table.td>
                 </x-ui.table.tr>
             @empty
                 <x-ui.table.tr>
-                    <x-ui.table.td colspan="6">
+                    <x-ui.table.td colspan="7">
                         <div class="py-8 text-center text-[13px] text-ink-subtle">No distributors configured yet.</div>
                     </x-ui.table.td>
                 </x-ui.table.tr>
