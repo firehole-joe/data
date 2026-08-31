@@ -8,6 +8,7 @@ use App\Models\FeedRun;
 use App\Models\PriceHistory;
 use App\Services\Feeds\Contracts\FeedDriverInterface;
 use App\Services\Feeds\DTOs\FeedItemDTO;
+use App\Services\Matching\ProductMatchingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\LazyCollection;
@@ -34,6 +35,8 @@ class FeedIngestionService
         'quantity_available',
         'is_in_stock',
     ];
+
+    public function __construct(private readonly ProductMatchingService $matcher) {}
 
     public function ingest(Distributor $distributor, bool $dryRun = false): FeedRun
     {
@@ -164,6 +167,8 @@ class FeedIngestionService
         $product->last_feed_update_at = now();
         $product->save();
 
+        $this->matchIngestedProduct($product);
+
         PriceHistory::updateOrCreate(
             [
                 'distributor_product_id' => $product->id,
@@ -176,6 +181,27 @@ class FeedIngestionService
         );
 
         return $isMeaningfulChange;
+    }
+
+    /**
+     * Route a freshly upserted product through the matcher. A matching
+     * failure must never abort feed ingestion, so it is logged and
+     * swallowed here rather than bubbling into the per-row counters.
+     */
+    private function matchIngestedProduct(DistributorProduct $product): void
+    {
+        if ($product->master_ammunition_id !== null) {
+            return;
+        }
+
+        try {
+            $this->matcher->matchProduct($product);
+        } catch (\Throwable $e) {
+            Log::channel('daily')->warning('feed.match.failed', [
+                'distributor_product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function resolveDriver(Distributor $distributor): FeedDriverInterface
