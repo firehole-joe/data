@@ -7,24 +7,25 @@ use App\Services\Feeds\DTOs\FeedItemDTO;
 /**
  * Feed driver for RSR Group.
  *
- * RSR serves an SFTP account at `ftps.rsrgroup.com:2222`. The primary
- * catalog is `rsrinventory-new.txt` — a semicolon-delimited, header-less,
- * fixed-column file (~77 columns) refreshed every two hours that carries
- * SKU, UPC, description, dealer price, inventory qty, MAP and department.
- * A companion `IM-QTY-CSV.csv` delta refreshes every five minutes; point
+ * RSR serves an FTP-over-TLS (FTPS) account at `ftps.rsrgroup.com:2222`.
+ * The primary catalog is `ftpdownloads/rsrinventory-new.txt` — a
+ * semicolon-delimited, header-less, fixed-column file (~77 columns)
+ * refreshed every two hours that carries SKU, UPC, description, dealer
+ * price, inventory qty, MAP and department. A companion
+ * `ftpdownloads/IM-QTY-CSV.csv` delta refreshes every five minutes; point
  * `connection_settings.remote_path` at it for near-real-time quantity
  * pulls. Only Department 18 (Ammunition) rows are kept.
  */
 class RsrFeedDriver extends AbstractFeedDriver
 {
-    /** SFTP port RSR listens on. */
+    /** FTPS port RSR listens on. */
     public const DEFAULT_PORT = 2222;
 
     /** Primary catalog file, updated every two hours. */
-    public const CATALOG_FILE = 'rsrinventory-new.txt';
+    public const CATALOG_FILE = 'ftpdownloads/rsrinventory-new.txt';
 
     /** Fast quantity delta file, updated every five minutes. */
-    public const QUANTITY_DELTA_FILE = 'IM-QTY-CSV.csv';
+    public const QUANTITY_DELTA_FILE = 'ftpdownloads/IM-QTY-CSV.csv';
 
     /** Zero-based column positions in the RSR inventory file. */
     private const COL_STOCK_NUMBER = 0;
@@ -59,12 +60,20 @@ class RsrFeedDriver extends AbstractFeedDriver
 
     protected function defaultTransport(): string
     {
-        return 'sftp';
+        return 'ftp';
     }
 
     protected function defaultPort(): ?int
     {
         return self::DEFAULT_PORT;
+    }
+
+    /**
+     * RSR requires explicit FTP-over-TLS on port 2222.
+     */
+    protected function defaultSsl(): bool
+    {
+        return true;
     }
 
     protected function defaultRemotePath(): string

@@ -65,51 +65,51 @@ class RsrFeedDriverTest extends TestCase
         }
     }
 
-    public function test_it_defaults_to_sftp_port_2222(): void
+    public function test_it_defaults_to_ftps_transport_on_port_2222(): void
     {
         $driver = new RsrFeedDriver;
 
+        $this->assertSame('ftp', $this->callProtected($driver, 'defaultTransport'));
         $this->assertSame(2222, $this->callProtected($driver, 'defaultPort'));
         $this->assertSame(2222, RsrFeedDriver::DEFAULT_PORT);
-        $this->assertSame('sftp', $this->callProtected($driver, 'defaultTransport'));
+        $this->assertTrue($this->callProtected($driver, 'defaultSsl'), 'RSR must negotiate FTPS');
     }
 
-    public function test_sftp_connection_provider_receives_port_2222_when_unspecified(): void
+    public function test_ftp_connection_options_use_port_2222_with_tls_when_unspecified(): void
     {
         $driver = new RsrFeedDriver;
 
-        // host/user only — no explicit port.
-        $filesystem = $this->callProtected($driver, 'sftpFilesystem', [[
+        // host/user only — no explicit port or ssl flag.
+        $filesystem = $this->callProtected($driver, 'ftpFilesystem', [[
             'host' => 'ftps.rsrgroup.com',
             'username' => 'acct',
         ]]);
 
-        $port = $this->readPrivate(
-            $this->readPrivate(
-                $this->readPrivate($filesystem, 'adapter'),
-                'connectionProvider',
-            ),
-            'port',
+        $options = $this->readPrivate(
+            $this->readPrivate($filesystem, 'adapter'),
+            'connectionOptions',
         );
 
-        $this->assertSame(2222, $port);
+        $this->assertSame(2222, $options->port());
+        $this->assertTrue($options->ssl());
     }
 
     public function test_remote_path_resolves_to_the_primary_catalog_file(): void
     {
         $driver = new RsrFeedDriver;
+        $catalog = 'ftpdownloads/rsrinventory-new.txt';
 
-        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'defaultRemotePath'));
-        $this->assertSame('rsrinventory-new.txt', RsrFeedDriver::CATALOG_FILE);
+        $this->assertSame($catalog, $this->callProtected($driver, 'defaultRemotePath'));
+        $this->assertSame($catalog, RsrFeedDriver::CATALOG_FILE);
 
         // Unspecified, blank, and a bare "/" all fall back to the catalog file.
-        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [[]]));
-        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '/']]));
-        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '   ']]));
-        $this->assertSame('rsrinventory-new.txt', $this->callProtected($driver, 'remotePath', [['path' => '']]));
+        $this->assertSame($catalog, $this->callProtected($driver, 'remotePath', [[]]));
+        $this->assertSame($catalog, $this->callProtected($driver, 'remotePath', [['remote_path' => '/']]));
+        $this->assertSame($catalog, $this->callProtected($driver, 'remotePath', [['remote_path' => '   ']]));
+        $this->assertSame($catalog, $this->callProtected($driver, 'remotePath', [['path' => '']]));
 
         // An explicit path (e.g. the fast quantity delta file) is honoured, minus any leading slash.
-        $this->assertSame('IM-QTY-CSV.csv', $this->callProtected($driver, 'remotePath', [['remote_path' => 'IM-QTY-CSV.csv']]));
+        $this->assertSame('ftpdownloads/IM-QTY-CSV.csv', $this->callProtected($driver, 'remotePath', [['remote_path' => 'ftpdownloads/IM-QTY-CSV.csv']]));
         $this->assertSame('feeds/custom.txt', $this->callProtected($driver, 'remotePath', [['remote_path' => '/feeds/custom.txt']]));
         $this->assertSame('alt.txt', $this->callProtected($driver, 'remotePath', [['path' => 'alt.txt']]));
     }

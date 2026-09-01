@@ -41,7 +41,7 @@ class DistributorSeeder extends Seeder
             [
                 'name' => 'RSR Group',
                 'slug' => 'rsr',
-                'transport_type' => 'sftp',
+                'transport_type' => 'ftp',
                 'driver_class' => RsrFeedDriver::class,
             ],
             [
@@ -99,7 +99,9 @@ class DistributorSeeder extends Seeder
         return match ($transportType) {
             'sftp' => [
                 'host' => null,
-                'port' => 22,
+                // null lets the driver's own default port win until an
+                // operator sets one via the admin UI.
+                'port' => null,
                 'username' => null,
                 'password' => null,
                 'private_key' => null,
@@ -107,7 +109,7 @@ class DistributorSeeder extends Seeder
             ],
             'ftp' => [
                 'host' => null,
-                'port' => 21,
+                'port' => null,
                 'username' => null,
                 'password' => null,
                 'passive' => true,

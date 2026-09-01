@@ -66,6 +66,16 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
         return null;
     }
 
+    /**
+     * Whether an FTP connection should negotiate TLS (FTPS) by default
+     * when connection_settings does not say. Overridden by a driver that
+     * only speaks FTPS.
+     */
+    protected function defaultSsl(): bool
+    {
+        return false;
+    }
+
     protected function expectsHeaderRow(): bool
     {
         return true;
@@ -664,14 +674,20 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
      */
     private function ftpFilesystem(array $settings): Filesystem
     {
+        $ssl = (bool) ($settings['ssl'] ?? $this->defaultSsl());
+
         return new Filesystem(new FtpAdapter(FtpConnectionOptions::fromArray([
             'host' => (string) ($settings['host'] ?? ''),
             'username' => (string) ($settings['username'] ?? ''),
             'password' => (string) ($settings['password'] ?? ''),
             'port' => (int) ($settings['port'] ?? $this->defaultPort() ?? 21),
             'root' => $this->baseDirectory($settings),
-            'ssl' => (bool) ($settings['ssl'] ?? false),
+            'ssl' => $ssl,
             'passive' => (bool) ($settings['passive'] ?? true),
+            // FTPS endpoints behind NAT frequently advertise an unreachable
+            // PASV address; trust the control-channel host instead.
+            'ignorePassiveAddress' => (bool) ($settings['ignore_passive_address'] ?? $ssl),
+            'utf8' => (bool) ($settings['utf8'] ?? true),
             'timeout' => (int) ($settings['timeout'] ?? 30),
         ])));
     }
