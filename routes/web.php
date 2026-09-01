@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/', [SupplyReportController::class, 'index'])->name('supply.index');
+Route::get('/dashboard', [SupplyReportController::class, 'dashboard'])->name('supply.dashboard');
 Route::get('/distributors', [SupplyReportController::class, 'distributors'])->name('supply.distributors');
 
 /*

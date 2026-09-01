@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
 use App\Models\MasterAmmunition;
+use App\Services\Ammunition\SupplyReportQueryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -90,6 +91,24 @@ class SupplyReportController extends Controller
                 'search' => $search,
                 'in_stock_only' => $inStockOnly,
             ],
+        ]);
+    }
+
+    /**
+     * The context-aware Ammunition Supply Dashboard: multi-distributor
+     * accordion table, filtered stat cards and advanced attribute
+     * filters, all driven by {@see SupplyReportQueryService}.
+     */
+    public function dashboard(Request $request, SupplyReportQueryService $query)
+    {
+        $filters = $query->normalizeFilters($request);
+
+        return view('supply.dashboard', [
+            'masters' => $query->paginate($filters),
+            'stats' => $query->stats($filters),
+            'options' => $query->filterOptions(),
+            'filters' => $filters,
+            'perPageOptions' => SupplyReportQueryService::PER_PAGE_OPTIONS,
         ]);
     }
 

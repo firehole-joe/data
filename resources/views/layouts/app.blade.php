@@ -108,6 +108,7 @@
             @php
                 $nav = [
                     ['label' => 'Live Supply Report', 'route' => 'supply.index'],
+                    ['label' => 'Supply Dashboard', 'route' => 'supply.dashboard'],
                     ['label' => 'Distributors & Feed Health', 'route' => 'supply.distributors'],
                 ];
             @endphp

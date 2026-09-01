@@ -24,6 +24,7 @@ class DistributorProduct extends Model
         'raw_mfr_part_number',
         'raw_description',
         'wholesale_price',
+        'cost_per_round',
         'map_price',
         'msrp_price',
         'quantity_available',
@@ -38,6 +39,7 @@ class DistributorProduct extends Model
      */
     protected $casts = [
         'wholesale_price' => 'decimal:2',
+        'cost_per_round' => 'decimal:4',
         'map_price' => 'decimal:2',
         'msrp_price' => 'decimal:2',
         'quantity_available' => 'integer',
