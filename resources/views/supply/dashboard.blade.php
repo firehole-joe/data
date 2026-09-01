@@ -4,8 +4,10 @@
 
 @php
     use Illuminate\Support\Str;
+    use App\Services\Ammunition\SupplyReportQueryService;
 
     $money = fn ($v, $dp = 2) => $v === null ? '—' : '$' . number_format((float) $v, $dp);
+
     $selectedCalibers = $filters['calibers'];
     $selectedProjectiles = $filters['projectile_types'];
     $selectedGrains = $filters['grain_weights'];
@@ -13,9 +15,32 @@
 
     $hasActiveFilters = $selectedCalibers || $selectedProjectiles || $selectedGrains || $selectedDistributors
         || $filters['stock_status'] !== 'all' || $filters['min_qty'] > 0 || $filters['search'] !== ''
-        || $filters['per_page'] !== \App\Services\Ammunition\SupplyReportQueryService::DEFAULT_PER_PAGE
+        || $filters['per_page'] !== SupplyReportQueryService::DEFAULT_PER_PAGE
         || $filters['sort_by'] !== 'manufacturer' || $filters['sort_dir'] !== 'asc';
+
+    // Compact "what's selected" summary for an accordion header badge.
+    $selectionBadge = function (array $selected, string $unit = ''): ?string {
+        if (! $selected) {
+            return null;
+        }
+        if (count($selected) <= 2) {
+            return implode(', ', array_map(fn ($v) => $v . $unit, $selected));
+        }
+        return count($selected) . ' selected';
+    };
+
+    $distributorBadge = $selectedDistributors
+        ? count($selectedDistributors) . ' ' . ($filters['distributor_mode'] === 'exclude' ? 'excluded' : 'selected')
+        : null;
 @endphp
+
+@push('head')
+<style>
+    [data-accordion-body] { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+    [data-accordion-body].is-open { grid-template-rows: 1fr; }
+    [data-accordion-body] > div { overflow: hidden; min-height: 0; }
+</style>
+@endpush
 
 @section('content')
 <form id="supply-filters" method="GET" action="{{ route('supply.dashboard') }}" class="space-y-5">
@@ -101,98 +126,33 @@
     </div>
 
     {{-- ---------------------------------------------------------------- --}}
-    {{-- Filter toolbar --}}
+    {{-- Primary toolbar (always visible) --}}
     {{-- ---------------------------------------------------------------- --}}
     <div class="space-y-3 rounded-xl border border-line bg-surface p-3.5">
+        <div class="flex flex-wrap items-end gap-2">
+            <label class="flex flex-1 flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle sm:min-w-[18rem]">
+                Search UPC / SKU / MPN / Brand / Name
+                <input type="text" name="search" value="{{ $filters['search'] }}" autocomplete="off"
+                    class="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 dark:bg-surface-2">
+            </label>
 
-        {{-- Distributor selector --}}
-        <div class="flex flex-wrap items-center gap-1.5">
-            <span class="mr-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Distributors</span>
-            <button type="button" data-dist-all class="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">All</button>
-            <button type="button" data-dist-none class="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">None</button>
-
-            @foreach ($options['distributors'] as $distributor)
-                @php $on = in_array($distributor->id, $selectedDistributors, true); @endphp
-                <label class="cursor-pointer select-none">
-                    <input type="checkbox" name="distributors[]" value="{{ $distributor->id }}" @checked($on) class="peer sr-only" data-dist-toggle>
-                    <span class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-accent-fg {{ $on ? '' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
-                        {{ $distributor->name }}
-                    </span>
-                </label>
-            @endforeach
-
-            <select name="distributor_mode" class="ml-1 rounded-lg border border-line bg-surface px-2 py-1 text-[11px] text-ink outline-none focus:border-accent dark:bg-surface-2" data-autosubmit>
-                <option value="include" @selected($filters['distributor_mode'] === 'include')>Include selected</option>
-                <option value="exclude" @selected($filters['distributor_mode'] === 'exclude')>Exclude selected</option>
-            </select>
-        </div>
-
-        {{-- Quick caliber chips --}}
-        <div class="flex flex-wrap items-center gap-1.5">
-            <span class="mr-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Caliber</span>
-            @foreach ($options['featured_calibers'] as $caliber)
-                @php $on = in_array($caliber, $selectedCalibers, true); @endphp
-                <label class="cursor-pointer select-none">
-                    <input type="checkbox" name="calibers[]" value="{{ $caliber }}" @checked($on) class="peer sr-only" data-autosubmit>
-                    <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-accent-fg {{ $on ? '' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
-                        {{ $caliber }}
-                    </span>
-                </label>
-            @endforeach
-        </div>
-
-        {{-- Quick projectile chips --}}
-        <div class="flex flex-wrap items-center gap-1.5">
-            <span class="mr-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Projectile</span>
-            @foreach ($options['featured_projectiles'] as $projectile)
-                @php $on = in_array($projectile, $selectedProjectiles, true); @endphp
-                <label class="cursor-pointer select-none">
-                    <input type="checkbox" name="projectile_types[]" value="{{ $projectile }}" @checked($on) class="peer sr-only" data-autosubmit>
-                    <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-accent-fg {{ $on ? '' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
-                        {{ $projectile }}
-                    </span>
-                </label>
-            @endforeach
-        </div>
-
-        {{-- Grain weight chips --}}
-        @if ($options['grain_weights'])
-            <div class="flex flex-wrap items-center gap-1.5">
-                <span class="mr-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Grain</span>
-                @foreach ($options['grain_weights'] as $grain)
-                    @php $on = in_array($grain, $selectedGrains, true); @endphp
-                    <label class="cursor-pointer select-none">
-                        <input type="checkbox" name="grain_weights[]" value="{{ $grain }}" @checked($on) class="peer sr-only" data-autosubmit>
-                        <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-accent-fg {{ $on ? '' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
-                            {{ $grain }} gr
-                        </span>
-                    </label>
-                @endforeach
-            </div>
-        @endif
-
-        {{-- Row: stock segmented + min qty + search + per page + sort --}}
-        <div class="flex flex-wrap items-end gap-2 border-t border-line pt-3">
-            <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Stock status">
-                @foreach (['all' => 'All', 'in_stock' => 'In Stock Only', 'out_of_stock' => 'Out of Stock'] as $value => $label)
-                    @php $on = $filters['stock_status'] === $value; @endphp
-                    <label class="cursor-pointer select-none">
-                        <input type="radio" name="stock_status" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
-                        <span class="inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">{{ $label }}</span>
-                    </label>
-                @endforeach
+            <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                Stock
+                <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Stock status">
+                    @foreach (['all' => 'All', 'in_stock' => 'In Stock Only', 'out_of_stock' => 'Out of Stock'] as $value => $label)
+                        @php $on = $filters['stock_status'] === $value; @endphp
+                        <label class="cursor-pointer select-none">
+                            <input type="radio" name="stock_status" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                            <span class="inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">{{ $label }}</span>
+                        </label>
+                    @endforeach
+                </div>
             </div>
 
             <label class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
                 Min qty
                 <input type="number" name="min_qty" min="0" value="{{ $filters['min_qty'] ?: '' }}" placeholder="0"
                     class="w-20 rounded-lg border border-line bg-surface px-2 py-1.5 text-[13px] tabular-nums text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 dark:bg-surface-2">
-            </label>
-
-            <label class="flex flex-1 flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle sm:min-w-[16rem]">
-                Search UPC / SKU / MPN / Brand / Name
-                <input type="text" name="search" value="{{ $filters['search'] }}" autocomplete="off"
-                    class="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 dark:bg-surface-2">
             </label>
 
             <label class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
@@ -221,6 +181,74 @@
                 </select>
             </label>
         </div>
+
+        @include('supply.partials._active-filter-pills', [
+            'filters' => $filters,
+            'distributors' => $facets['distributors'],
+        ])
+    </div>
+
+    {{-- ---------------------------------------------------------------- --}}
+    {{-- Filter accordions --}}
+    {{-- ---------------------------------------------------------------- --}}
+    <div class="space-y-2">
+
+        {{-- Accordion 1: Distributors --}}
+        <x-ui.accordion title="Distributors" :badge="$distributorBadge" :open="(bool) $selectedDistributors">
+            <div class="space-y-2.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <button type="button" data-dist-all class="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">Select all</button>
+                    <button type="button" data-dist-none class="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">Select none</button>
+
+                    <select name="distributor_mode" class="ml-auto rounded-lg border border-line bg-surface px-2 py-1 text-[11px] text-ink outline-none focus:border-accent dark:bg-surface-2" data-autosubmit>
+                        <option value="include" @selected($filters['distributor_mode'] === 'include')>Include selected</option>
+                        <option value="exclude" @selected($filters['distributor_mode'] === 'exclude')>Exclude selected</option>
+                    </select>
+                </div>
+
+                <div class="flex flex-wrap gap-1.5">
+                    @foreach ($facets['distributors'] as $distributor)
+                        @php $on = in_array($distributor->id, $selectedDistributors, true); @endphp
+                        <label class="cursor-pointer select-none">
+                            <input type="checkbox" name="distributors[]" value="{{ $distributor->id }}" @checked($on) class="peer sr-only" data-dist-toggle data-autosubmit>
+                            <span class="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-accent-fg {{ $on ? '' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
+                                {{ $distributor->name }}
+                            </span>
+                        </label>
+                    @endforeach
+                </div>
+            </div>
+        </x-ui.accordion>
+
+        {{-- Accordion 2: Caliber --}}
+        <x-ui.accordion title="Caliber" :badge="$selectionBadge($selectedCalibers)" :open="(bool) $selectedCalibers">
+            @include('supply.partials._facet-group', [
+                'name' => 'calibers',
+                'available' => $facets['calibers'],
+                'selected' => $selectedCalibers,
+                'unit' => '',
+            ])
+        </x-ui.accordion>
+
+        {{-- Accordion 3: Projectile Type --}}
+        <x-ui.accordion title="Projectile Type" :badge="$selectionBadge($selectedProjectiles)" :open="(bool) $selectedProjectiles">
+            @include('supply.partials._facet-group', [
+                'name' => 'projectile_types',
+                'available' => $facets['projectile_types'],
+                'selected' => $selectedProjectiles,
+                'unit' => '',
+            ])
+        </x-ui.accordion>
+
+        {{-- Accordion 4: Grain Weight --}}
+        <x-ui.accordion title="Grain Weight" :badge="$selectionBadge($selectedGrains, ' gr')" :open="(bool) $selectedGrains">
+            @include('supply.partials._facet-group', [
+                'name' => 'grain_weights',
+                'available' => $facets['grain_weights'],
+                'selected' => $selectedGrains,
+                'unit' => ' gr',
+            ])
+        </x-ui.accordion>
     </div>
 
     {{-- ---------------------------------------------------------------- --}}
@@ -348,7 +376,7 @@
             el.addEventListener('change', function () { form.requestSubmit(); });
         });
 
-        // Distributor All / None.
+        // Distributor Select all / none.
         var toggles = form.querySelectorAll('[data-dist-toggle]');
         function bulkDistributors(state) {
             toggles.forEach(function (t) { t.checked = state; });
@@ -358,11 +386,42 @@
         var noneBtn = form.querySelector('[data-dist-none]');
         if (allBtn) allBtn.addEventListener('click', function () { bulkDistributors(true); });
         if (noneBtn) noneBtn.addEventListener('click', function () { bulkDistributors(false); });
-        toggles.forEach(function (t) {
-            t.addEventListener('change', function () { form.requestSubmit(); });
+
+        // Active filter pills — remove one value and re-query.
+        form.querySelectorAll('[data-pill-remove]').forEach(function (pill) {
+            pill.addEventListener('click', function () {
+                var name = pill.getAttribute('data-pill-name');
+                var value = pill.getAttribute('data-pill-value');
+
+                if (name === 'search' || name === 'min_qty') {
+                    var input = form.querySelector('[name="' + name + '"]');
+                    if (input) input.value = '';
+                } else if (name === 'stock_status') {
+                    var radio = form.querySelector('[name="stock_status"][value="all"]');
+                    if (radio) radio.checked = true;
+                } else {
+                    var box = form.querySelector('[name="' + name + '[]"][value="' + value + '"]');
+                    if (box) box.checked = false;
+                }
+                form.requestSubmit();
+            });
         });
 
-        // Accordion rows.
+        // Collapsible filter accordions (CSS grid-rows transition).
+        form.querySelectorAll('[data-accordion]').forEach(function (section) {
+            var trigger = section.querySelector('[data-accordion-trigger]');
+            var body = section.querySelector('[data-accordion-body]');
+            var chevron = section.querySelector('[data-accordion-chevron]');
+            if (!trigger || !body) return;
+
+            trigger.addEventListener('click', function () {
+                var open = body.classList.toggle('is-open');
+                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (chevron) chevron.classList.toggle('rotate-180', open);
+            });
+        });
+
+        // Expandable table rows (per-master distributor offerings).
         form.querySelectorAll('[data-accordion-toggle]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var panel = document.getElementById(btn.getAttribute('data-accordion-toggle'));

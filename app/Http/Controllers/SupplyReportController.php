@@ -106,7 +106,7 @@ class SupplyReportController extends Controller
         return view('supply.dashboard', [
             'masters' => $query->paginate($filters),
             'stats' => $query->stats($filters),
-            'options' => $query->filterOptions(),
+            'facets' => $query->facets($filters),
             'filters' => $filters,
             'perPageOptions' => SupplyReportQueryService::PER_PAGE_OPTIONS,
         ]);

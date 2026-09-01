@@ -233,23 +233,87 @@ class SupplyReportQueryService
     }
 
     /**
-     * The option lists the filter toolbar renders from.
+     * Context-aware ("cascading") facet options for the filter accordions.
      *
-     * @return array<string, mixed>
+     * Each attribute facet is computed against a deliberately partial view
+     * of the active filters so the options narrow as the user drills in
+     * but a facet never hides its own already-picked values:
+     *
+     *   - calibers        ← distributor + stock scope
+     *   - projectile_types ← distributor + stock + caliber scope
+     *   - grain_weights   ← distributor + stock + caliber + projectile scope
+     *
+     * Every value is returned with the distinct master-SKU count that
+     * would remain if it were selected, so the badges reflect the cascade.
+     *
+     * @return array{
+     *     distributors: \Illuminate\Support\Collection<int, Distributor>,
+     *     calibers: array<string, int>,
+     *     projectile_types: array<string, int>,
+     *     grain_weights: array<int, int>,
+     *     per_page_options: array<int, int>
+     * }
      */
-    public function filterOptions(): array
+    public function facets(array $filters): array
     {
-        $tracked = MasterAmmunition::query()->where('is_tracked_in_report', true);
-
         return [
             'distributors' => Distributor::query()->orderBy('name')->get(['id', 'name', 'slug']),
-            'calibers' => (clone $tracked)->whereNotNull('caliber')->distinct()->orderBy('caliber')->pluck('caliber')->all(),
-            'projectile_types' => (clone $tracked)->whereNotNull('bullet_type')->distinct()->orderBy('bullet_type')->pluck('bullet_type')->all(),
-            'grain_weights' => (clone $tracked)->whereNotNull('bullet_weight_gr')->distinct()->orderBy('bullet_weight_gr')->pluck('bullet_weight_gr')->map(fn ($g) => (int) $g)->all(),
+            'calibers' => $this->facetCounts(
+                $filters,
+                'master_ammunition.caliber',
+                ['calibers', 'projectile_types', 'grain_weights', 'min_qty', 'search'],
+            ),
+            'projectile_types' => $this->facetCounts(
+                $filters,
+                'master_ammunition.bullet_type',
+                ['projectile_types', 'grain_weights', 'min_qty', 'search'],
+            ),
+            'grain_weights' => $this->facetCounts(
+                $filters,
+                'master_ammunition.bullet_weight_gr',
+                ['grain_weights', 'min_qty', 'search'],
+                true,
+            ),
             'per_page_options' => self::PER_PAGE_OPTIONS,
-            'featured_calibers' => self::FEATURED_CALIBERS,
-            'featured_projectiles' => self::FEATURED_PROJECTILES,
         ];
+    }
+
+    /**
+     * Distinct master-SKU count per distinct value of $column, evaluated
+     * against the filter bag with $reset keys neutralised (this is what
+     * makes the facet "cascade" rather than collapse to a single value).
+     *
+     * @param  array<int, string>  $reset  Filter keys to ignore for this facet.
+     * @return array<array-key, int> Ordered value => count.
+     */
+    private function facetCounts(array $filters, string $column, array $reset, bool $castKeyToInt = false): array
+    {
+        $scoped = $filters;
+
+        foreach ($reset as $key) {
+            $scoped[$key] = match ($key) {
+                'search' => '',
+                'min_qty' => 0,
+                default => [],
+            };
+        }
+
+        $rows = $this->baseOfferingQuery($scoped)->toBase()
+            ->whereNotNull($column)
+            ->groupBy($column)
+            ->orderBy($column)
+            ->selectRaw("{$column} as facet_value")
+            ->selectRaw('COUNT(DISTINCT distributor_products.master_ammunition_id) as facet_count')
+            ->get();
+
+        $out = [];
+
+        foreach ($rows as $row) {
+            $key = $castKeyToInt ? (int) $row->facet_value : (string) $row->facet_value;
+            $out[$key] = (int) $row->facet_count;
+        }
+
+        return $out;
     }
 
     /**

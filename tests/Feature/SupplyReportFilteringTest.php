@@ -354,4 +354,110 @@ class SupplyReportFilteringTest extends TestCase
             ->assertSee('NINE ITEM')
             ->assertDontSee('RIFLE ITEM');
     }
+
+    /* ----------------------------------------------------------------- */
+    /* Cascading filter facets */
+    /* ----------------------------------------------------------------- */
+
+    /**
+     * @return array<int, MasterAmmunition>
+     */
+    private function seedCascadeCatalogue(Distributor $distributor): array
+    {
+        $a = $this->master(['caliber' => '9mm Luger', 'bullet_type' => 'FMJ', 'bullet_weight_gr' => 115, 'mfr_part_number' => 'C-A']);
+        $b = $this->master(['caliber' => '9mm Luger', 'bullet_type' => 'JHP', 'bullet_weight_gr' => 124, 'mfr_part_number' => 'C-B']);
+        $c = $this->master(['caliber' => '9mm Luger', 'bullet_type' => 'JHP', 'bullet_weight_gr' => 147, 'mfr_part_number' => 'C-C']);
+        $d = $this->master(['caliber' => '.45 ACP', 'bullet_type' => 'FMJ', 'bullet_weight_gr' => 230, 'mfr_part_number' => 'C-D']);
+
+        foreach ([$a, $b, $c, $d] as $master) {
+            $this->listing($master, $distributor);
+        }
+
+        return [$a, $b, $c, $d];
+    }
+
+    public function test_caliber_selection_constrains_available_grain_weights(): void
+    {
+        $this->seedCascadeCatalogue($this->distributor());
+
+        $all = $this->service->facets($this->filters());
+        $this->assertEqualsCanonicalizing([115, 124, 147, 230], array_keys($all['grain_weights']));
+
+        $nine = $this->service->facets($this->filters(['calibers' => ['9mm Luger']]));
+        $this->assertEqualsCanonicalizing([115, 124, 147], array_keys($nine['grain_weights']));
+        $this->assertArrayNotHasKey(230, $nine['grain_weights']);
+    }
+
+    public function test_projectile_facet_follows_caliber_and_grain_facet_follows_projectile(): void
+    {
+        $this->seedCascadeCatalogue($this->distributor());
+
+        // Projectile options are scoped by the selected caliber only.
+        $nine = $this->service->facets($this->filters(['calibers' => ['9mm Luger']]));
+        $this->assertEqualsCanonicalizing(['FMJ', 'JHP'], array_keys($nine['projectile_types']));
+
+        // Grain options are scoped by caliber *and* projectile.
+        $nineJhp = $this->service->facets($this->filters([
+            'calibers' => ['9mm Luger'],
+            'projectile_types' => ['JHP'],
+        ]));
+        $this->assertEqualsCanonicalizing([124, 147], array_keys($nineJhp['grain_weights']));
+        $this->assertArrayNotHasKey(115, $nineJhp['grain_weights']);
+
+        // The projectile facet itself is NOT narrowed by its own selection.
+        $this->assertEqualsCanonicalizing(['FMJ', 'JHP'], array_keys($nineJhp['projectile_types']));
+    }
+
+    public function test_caliber_facet_is_not_narrowed_by_its_own_selection_and_reports_counts(): void
+    {
+        $this->seedCascadeCatalogue($this->distributor());
+
+        $facets = $this->service->facets($this->filters(['calibers' => ['9mm Luger']]));
+
+        $this->assertEqualsCanonicalizing(['9mm Luger', '.45 ACP'], array_keys($facets['calibers']));
+        $this->assertSame(3, $facets['calibers']['9mm Luger']);
+        $this->assertSame(1, $facets['calibers']['.45 ACP']);
+
+        // Projectile badge counts reflect the 9mm cascade: 1 FMJ + 2 JHP SKUs.
+        $this->assertSame(1, $facets['projectile_types']['FMJ']);
+        $this->assertSame(2, $facets['projectile_types']['JHP']);
+    }
+
+    public function test_facets_respect_distributor_and_stock_scope(): void
+    {
+        $rsr = $this->distributor(['name' => 'RSR Group', 'slug' => 'rsr']);
+        $lip = $this->distributor(['name' => 'Lipseys', 'slug' => 'lipseys']);
+
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'S-A']), $rsr, ['is_in_stock' => true, 'quantity_available' => 100]);
+        $this->listing($this->master(['caliber' => '10mm Auto', 'mfr_part_number' => 'S-B']), $rsr, ['is_in_stock' => false, 'quantity_available' => 0]);
+        $this->listing($this->master(['caliber' => '.45 ACP', 'mfr_part_number' => 'S-C']), $lip, ['is_in_stock' => true, 'quantity_available' => 100]);
+
+        $rsrOnly = $this->service->facets($this->filters(['distributors' => [$rsr->id]]));
+        $this->assertEqualsCanonicalizing(['9mm Luger', '10mm Auto'], array_keys($rsrOnly['calibers']));
+
+        $rsrInStock = $this->service->facets($this->filters([
+            'distributors' => [$rsr->id],
+            'stock_status' => 'in_stock',
+        ]));
+        $this->assertEqualsCanonicalizing(['9mm Luger'], array_keys($rsrInStock['calibers']));
+    }
+
+    public function test_dashboard_view_data_carries_cascading_facets_and_accordion_scaffolding(): void
+    {
+        $d = $this->distributor(['name' => 'RSR Group', 'slug' => 'rsr']);
+        $this->seedCascadeCatalogue($d);
+
+        $response = $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger']]))->assertOk();
+
+        $facets = $response->viewData('facets');
+        $this->assertArrayHasKey('calibers', $facets);
+        $this->assertArrayHasKey('projectile_types', $facets);
+        $this->assertArrayHasKey(115, $facets['grain_weights']);
+        $this->assertArrayNotHasKey(230, $facets['grain_weights']);
+
+        $response->assertSee('Projectile Type')
+            ->assertSee('Grain Weight')
+            ->assertSee('Clear All')
+            ->assertSee('data-accordion', false);
+    }
 }
