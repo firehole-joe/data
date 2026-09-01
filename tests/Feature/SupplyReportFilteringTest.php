@@ -457,7 +457,121 @@ class SupplyReportFilteringTest extends TestCase
 
         $response->assertSee('Projectile Type')
             ->assertSee('Grain Weight')
-            ->assertSee('Clear All')
+            ->assertSee('Reset All Filters')
             ->assertSee('data-accordion', false);
+    }
+
+    /* ----------------------------------------------------------------- */
+    /* Session persistence + global reset */
+    /* ----------------------------------------------------------------- */
+
+    public function test_dashboard_filters_are_captured_into_the_session(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'A']), $d);
+
+        $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger'], 'stock_status' => 'in_stock']))
+            ->assertOk();
+
+        $stored = session('supply_dashboard_filters');
+        $this->assertSame(['9mm Luger'], $stored['calibers']);
+        $this->assertSame('in_stock', $stored['stock_status']);
+    }
+
+    public function test_bare_dashboard_visit_restores_persisted_filters(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'A']), $d);
+        $this->listing($this->master(['caliber' => '.45 ACP', 'mfr_part_number' => 'B']), $d);
+
+        // Prime the session with a filtered request.
+        $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger'], 'stock_status' => 'in_stock']))
+            ->assertOk();
+
+        // A bare visit is redirected back onto the stored query string.
+        $redirect = $this->get(route('supply.dashboard'));
+        $redirect->assertRedirect();
+        $location = urldecode((string) $redirect->headers->get('Location'));
+        $this->assertStringContainsString('calibers', $location);
+        $this->assertStringContainsString('stock_status=in_stock', $location);
+
+        // Following the redirect renders the fully-restored state.
+        $this->followingRedirects()
+            ->get(route('supply.dashboard'))
+            ->assertOk()
+            ->assertViewHas('filters', fn ($f) => $f['calibers'] === ['9mm Luger'] && $f['stock_status'] === 'in_stock');
+    }
+
+    public function test_returning_to_dashboard_from_the_live_supply_report_keeps_filters(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'A']), $d);
+
+        $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger'], 'sort_by' => 'best_cpr']))->assertOk();
+
+        // Detour through the Live Supply Report, then back with a bare URL.
+        $this->get(route('supply.index'))->assertOk();
+
+        $redirect = $this->get(route('supply.dashboard'));
+        $redirect->assertRedirect();
+        $location = urldecode((string) $redirect->headers->get('Location'));
+        $this->assertStringContainsString('calibers', $location);
+        $this->assertStringContainsString('sort_by=best_cpr', $location);
+    }
+
+    public function test_reset_query_param_clears_the_session_and_redirects_clean(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'A']), $d);
+
+        $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger'], 'stock_status' => 'in_stock']))->assertOk();
+        $this->assertNotNull(session('supply_dashboard_filters'));
+
+        $this->get(route('supply.dashboard', ['reset' => 1]))
+            ->assertRedirect(route('supply.dashboard'));
+
+        $this->assertNull(session('supply_dashboard_filters'));
+
+        // The subsequent bare visit renders defaults (no restore).
+        $this->get(route('supply.dashboard'))
+            ->assertOk()
+            ->assertViewHas('filters', fn ($f) => $f['calibers'] === []
+                && $f['projectile_types'] === []
+                && $f['grain_weights'] === []
+                && $f['stock_status'] === 'all'
+                && $f['search'] === '');
+    }
+
+    public function test_reset_restores_unconstrained_facets(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'bullet_weight_gr' => 115, 'mfr_part_number' => 'A']), $d);
+        $this->listing($this->master(['caliber' => '.45 ACP', 'bullet_weight_gr' => 230, 'mfr_part_number' => 'B']), $d);
+
+        $this->get(route('supply.dashboard', ['calibers' => ['9mm Luger']]))
+            ->assertOk()
+            ->assertViewHas('facets', fn ($f) => array_keys($f['grain_weights']) === [115]);
+
+        $this->get(route('supply.dashboard', ['reset' => 1]))->assertRedirect(route('supply.dashboard'));
+
+        $this->get(route('supply.dashboard'))
+            ->assertOk()
+            ->assertViewHas('facets', function ($f) {
+                $grains = array_keys($f['grain_weights']);
+
+                return in_array(115, $grains, true) && in_array(230, $grains, true);
+            });
+    }
+
+    public function test_reset_bypasses_session_restoration_even_with_a_stored_filter_set(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['caliber' => '9mm Luger', 'mfr_part_number' => 'A']), $d);
+
+        $this->withSession(['supply_dashboard_filters' => ['calibers' => ['9mm Luger']]])
+            ->get(route('supply.dashboard', ['reset' => 1]))
+            ->assertRedirect(route('supply.dashboard'));
+
+        $this->assertNull(session('supply_dashboard_filters'));
     }
 }

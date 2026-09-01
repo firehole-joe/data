@@ -25,6 +25,24 @@ class SupplyReportController extends Controller
 
     private const PER_PAGE = 25;
 
+    /** Session key holding the visitor's last-used dashboard filter set. */
+    private const DASHBOARD_FILTER_SESSION_KEY = 'supply_dashboard_filters';
+
+    /** Request keys captured into / restored from the dashboard filter session. */
+    private const DASHBOARD_FILTER_KEYS = [
+        'distributors',
+        'distributor_mode',
+        'calibers',
+        'projectile_types',
+        'grain_weights',
+        'stock_status',
+        'min_qty',
+        'search',
+        'per_page',
+        'sort_by',
+        'sort_dir',
+    ];
+
     public function index(Request $request)
     {
         $caliber = trim((string) $request->input('caliber')) ?: 'All';
@@ -98,9 +116,44 @@ class SupplyReportController extends Controller
      * The context-aware Ammunition Supply Dashboard: multi-distributor
      * accordion table, filtered stat cards and advanced attribute
      * filters, all driven by {@see SupplyReportQueryService}.
+     *
+     * Filter selections survive navigation away and back: a request that
+     * carries filter params updates the `supply_dashboard_filters`
+     * session bag; a bare request (nav link, or returning from the Live
+     * Supply Report) is redirected back onto the stored query string so
+     * the URL, pills and accordions stay in sync. `?reset=1` clears the
+     * bag and bypasses restoration entirely.
      */
     public function dashboard(Request $request, SupplyReportQueryService $query)
     {
+        if ($request->has('reset')) {
+            $request->session()->forget(self::DASHBOARD_FILTER_SESSION_KEY);
+
+            return redirect()->route('supply.dashboard');
+        }
+
+        $incoming = array_filter(
+            $request->only(self::DASHBOARD_FILTER_KEYS),
+            fn ($value) => $value !== null && $value !== '' && $value !== [],
+        );
+
+        if ($incoming !== []) {
+            // The URL carries filters — mirror them into the session.
+            $request->session()->put(self::DASHBOARD_FILTER_SESSION_KEY, $incoming);
+        } else {
+            // Bare visit — re-hydrate the last-used filters from the session.
+            $stored = array_filter(
+                (array) $request->session()->get(self::DASHBOARD_FILTER_SESSION_KEY, []),
+                fn ($value) => $value !== null && $value !== '' && $value !== [],
+            );
+
+            if ($stored !== []) {
+                return redirect()->route('supply.dashboard', $stored);
+            }
+
+            $request->session()->forget(self::DASHBOARD_FILTER_SESSION_KEY);
+        }
+
         $filters = $query->normalizeFilters($request);
 
         return view('supply.dashboard', [

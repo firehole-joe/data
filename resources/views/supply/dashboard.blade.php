@@ -61,7 +61,7 @@
         <div class="flex items-center gap-2">
             <x-ui.button type="submit" variant="primary" size="sm">Apply filters</x-ui.button>
             @if ($hasActiveFilters)
-                <x-ui.button :href="route('supply.dashboard')" variant="ghost" size="sm">Reset</x-ui.button>
+                <x-ui.button :href="route('supply.dashboard', ['reset' => 1])" variant="ghost" size="sm">Reset All Filters</x-ui.button>
             @endif
         </div>
     </div>
@@ -180,6 +180,14 @@
                     <option value="desc" @selected($filters['sort_dir'] === 'desc')>Desc</option>
                 </select>
             </label>
+
+            <x-ui.button
+                :href="route('supply.dashboard', ['reset' => 1])"
+                variant="secondary"
+                size="sm"
+                class="ml-auto self-end"
+                data-reset-filters
+            >Reset All Filters</x-ui.button>
         </div>
 
         @include('supply.partials._active-filter-pills', [

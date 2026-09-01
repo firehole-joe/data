@@ -50,8 +50,12 @@
             </button>
         @endforeach
 
-        <a href="{{ route('supply.dashboard') }}" class="ml-1 text-[11px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition hover:text-ink">
-            Clear All
+        <a
+            href="{{ route('supply.dashboard', ['reset' => 1]) }}"
+            data-reset-filters
+            class="ml-1 text-[11px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition hover:text-ink"
+        >
+            Reset All Filters
         </a>
     </div>
 @endif
