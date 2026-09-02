@@ -181,13 +181,23 @@ class SupplyReportQueryService
      */
     public function paginate(array $filters): LengthAwarePaginator
     {
-        $dir = $filters['sort_dir'];
+        $dir = $filters['sort_dir'] === 'desc' ? 'desc' : 'asc';
+
+        // Aggregate expressions are declared once and reused verbatim in
+        // both the SELECT and the ORDER BY. PostgreSQL rejects an ORDER BY
+        // that wraps a SELECT alias in an expression on a grouped query
+        // (SQLSTATE 42703 / 42803 "must appear in the GROUP BY clause or
+        // be used in an aggregate function"), so the ordering has to
+        // repeat the aggregate itself rather than lean on `agg_*` aliases.
+        $bestPriceExpr = 'MIN(CASE WHEN distributor_products.wholesale_price > 0 THEN distributor_products.wholesale_price END)';
+        $bestCprExpr = 'MIN(CASE WHEN distributor_products.wholesale_price > 0 AND master_ammunition.rounds_per_box > 0 THEN distributor_products.wholesale_price * 1.0 / master_ammunition.rounds_per_box END)';
+        $totalQtyExpr = 'COALESCE(SUM(distributor_products.quantity_available), 0)';
 
         $grouped = $this->baseOfferingQuery($filters)->toBase()
             ->select('distributor_products.master_ammunition_id as mid')
-            ->selectRaw('MIN(CASE WHEN distributor_products.wholesale_price > 0 THEN distributor_products.wholesale_price END) as agg_best_price')
-            ->selectRaw('MIN(CASE WHEN distributor_products.wholesale_price > 0 AND master_ammunition.rounds_per_box > 0 THEN distributor_products.wholesale_price * 1.0 / master_ammunition.rounds_per_box END) as agg_best_cpr')
-            ->selectRaw('COALESCE(SUM(distributor_products.quantity_available), 0) as agg_total_qty')
+            ->selectRaw("{$bestPriceExpr} as agg_best_price")
+            ->selectRaw("{$bestCprExpr} as agg_best_cpr")
+            ->selectRaw("{$totalQtyExpr} as agg_total_qty")
             ->addSelect('master_ammunition.manufacturer as m_manufacturer')
             ->addSelect('master_ammunition.caliber as m_caliber')
             ->addSelect('master_ammunition.name as m_name')
@@ -198,12 +208,23 @@ class SupplyReportQueryService
                 'master_ammunition.name',
             );
 
+        // The leading `(expr) is null` clause keeps NULL prices / CPRs at
+        // the end for both sort directions (portable across PostgreSQL,
+        // SQLite and MySQL; avoids relying on NULLS LAST support).
         match ($filters['sort_by']) {
             'caliber' => $grouped->orderBy('m_caliber', $dir)->orderBy('m_manufacturer')->orderBy('m_name'),
-            'name' => $grouped->orderBy('m_name', $dir),
-            'best_price' => $grouped->orderByRaw('(agg_best_price IS NULL) asc')->orderBy('agg_best_price', $dir),
-            'best_cpr' => $grouped->orderByRaw('(agg_best_cpr IS NULL) asc')->orderBy('agg_best_cpr', $dir),
-            'total_qty' => $grouped->orderBy('agg_total_qty', $dir),
+            'name' => $grouped->orderBy('m_name', $dir)->orderBy('m_manufacturer'),
+            'best_price' => $grouped
+                ->orderByRaw("({$bestPriceExpr}) is null")
+                ->orderByRaw("({$bestPriceExpr}) {$dir}")
+                ->orderBy('m_manufacturer'),
+            'best_cpr' => $grouped
+                ->orderByRaw("({$bestCprExpr}) is null")
+                ->orderByRaw("({$bestCprExpr}) {$dir}")
+                ->orderBy('m_manufacturer'),
+            'total_qty' => $grouped
+                ->orderByRaw("({$totalQtyExpr}) {$dir}")
+                ->orderBy('m_manufacturer'),
             default => $grouped->orderBy('m_manufacturer', $dir)->orderBy('m_caliber')->orderBy('m_name'),
         };
 

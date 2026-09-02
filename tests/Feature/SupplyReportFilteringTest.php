@@ -8,6 +8,7 @@ use App\Models\MasterAmmunition;
 use App\Services\Ammunition\SupplyReportQueryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class SupplyReportFilteringTest extends TestCase
@@ -209,6 +210,82 @@ class SupplyReportFilteringTest extends TestCase
 
         $byQty = $this->service->paginate($this->filters(['sort_by' => 'total_qty', 'sort_dir' => 'desc']));
         $this->assertSame(['MID', 'DEAR', 'CHEAP'], $byQty->pluck('name')->all());
+    }
+
+    /**
+     * Regression: on PostgreSQL an ORDER BY that wrapped a SELECT alias in
+     * an expression on the grouped query raised SQLSTATE 42803 and 500'd
+     * the dashboard. The ordering now repeats the aggregate itself.
+     *
+     * @dataProvider priceSortProvider
+     */
+    public function test_sorting_by_best_price_and_best_cpr_keeps_nulls_last(string $sortBy): void
+    {
+        $d = $this->distributor();
+        $cheap = $this->master(['name' => 'CHEAP', 'mfr_part_number' => 'C1', 'rounds_per_box' => 50]);
+        $dear = $this->master(['name' => 'DEAR', 'mfr_part_number' => 'D1', 'rounds_per_box' => 50]);
+        $unpriced = $this->master(['name' => 'UNPRICED', 'mfr_part_number' => 'U1', 'rounds_per_box' => 50]);
+
+        $this->listing($cheap, $d, ['wholesale_price' => 6.00, 'quantity_available' => 10]);
+        $this->listing($dear, $d, ['wholesale_price' => 24.00, 'quantity_available' => 10]);
+        // No positive price -> agg_best_price / agg_best_cpr resolve to NULL.
+        $this->listing($unpriced, $d, ['wholesale_price' => 0.00, 'quantity_available' => 10]);
+
+        $asc = $this->service->paginate($this->filters(['sort_by' => $sortBy, 'sort_dir' => 'asc']));
+        $this->assertSame(['CHEAP', 'DEAR', 'UNPRICED'], $asc->pluck('name')->all(), "{$sortBy} asc");
+
+        $desc = $this->service->paginate($this->filters(['sort_by' => $sortBy, 'sort_dir' => 'desc']));
+        $this->assertSame(['DEAR', 'CHEAP', 'UNPRICED'], $desc->pluck('name')->all(), "{$sortBy} desc");
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function priceSortProvider(): array
+    {
+        return [
+            'Best $/Box' => ['best_price'],
+            'Best $/Rd' => ['best_cpr'],
+        ];
+    }
+
+    public function test_price_sorts_order_by_the_aggregate_not_a_select_alias(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['mfr_part_number' => 'A']), $d, ['wholesale_price' => 10.00]);
+
+        $groupedSql = [];
+        DB::listen(function ($query) use (&$groupedSql) {
+            $sql = strtolower($query->sql);
+            // Only the grouped master query is of interest here.
+            if (str_contains($sql, 'group by') && str_contains($sql, 'order by')) {
+                $groupedSql[] = $sql;
+            }
+        });
+
+        $this->service->paginate($this->filters(['sort_by' => 'best_price', 'sort_dir' => 'asc']));
+        $this->service->paginate($this->filters(['sort_by' => 'best_cpr', 'sort_dir' => 'desc']));
+
+        $this->assertNotEmpty($groupedSql);
+        foreach ($groupedSql as $sql) {
+            // The ORDER BY repeats the MIN(...) aggregate rather than
+            // wrapping the `agg_*` SELECT alias (which PostgreSQL rejects).
+            $this->assertStringContainsString('order by (min(case when', $sql);
+            $this->assertStringNotContainsString('agg_best_price is null', $sql);
+            $this->assertStringNotContainsString('agg_best_cpr is null', $sql);
+        }
+    }
+
+    public function test_dashboard_route_sorts_by_price_columns_without_sql_errors(): void
+    {
+        $d = $this->distributor();
+        $this->listing($this->master(['mfr_part_number' => 'A']), $d, ['wholesale_price' => 12.00]);
+        $this->listing($this->master(['mfr_part_number' => 'B']), $d, ['wholesale_price' => 0.00]);
+
+        foreach ([['best_price', 'asc'], ['best_price', 'desc'], ['best_cpr', 'asc'], ['best_cpr', 'desc']] as [$by, $dir]) {
+            $this->get(route('supply.dashboard', ['sort_by' => $by, 'sort_dir' => $dir]))
+                ->assertOk();
+        }
     }
 
     /* ----------------------------------------------------------------- */
