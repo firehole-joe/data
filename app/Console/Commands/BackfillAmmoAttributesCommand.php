@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\DistributorProduct;
+use App\Models\DistributorSkuOverride;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\AmmoAttributeExtractor;
 use App\Services\Feeds\AmmoPricingGuardrail;
@@ -83,14 +84,31 @@ class BackfillAmmoAttributesCommand extends Command
                     );
 
                     $master = $product->masterAmmunition;
-                    // An explicit packaging count from the description / SKU
-                    // (e.g. "50/1000" box/case slash notation) is the most
-                    // reliable signal and overrides a possibly stale master.
-                    $roundCount = $attributes['round_count_explicit']
-                        ? $attributes['round_count']
-                        : (($master && (int) $master->rounds_per_box > 0)
-                            ? (int) $master->rounds_per_box
-                            : $attributes['round_count']);
+
+                    // A reviewer-confirmed override for this distributor SKU
+                    // (or a count already pinned to the row from a past
+                    // approval) is authoritative — future imports must price
+                    // against it and never re-flag it for the same fault.
+                    $override = DistributorSkuOverride::query()
+                        ->where('distributor_id', $product->distributor_id)
+                        ->where('distributor_sku', $product->distributor_sku)
+                        ->value('round_count');
+
+                    // Otherwise an explicit packaging count from the
+                    // description / SKU (e.g. "50/1000" box/case slash
+                    // notation) is the most reliable signal and overrides a
+                    // possibly stale master.
+                    $roundCount = (int) ($override
+                        ?? $product->round_count
+                        ?? ($attributes['round_count_explicit']
+                            ? $attributes['round_count']
+                            : (($master && (int) $master->rounds_per_box > 0)
+                                ? (int) $master->rounds_per_box
+                                : $attributes['round_count'])));
+
+                    if ($override !== null && ! $dryRun && (int) $product->round_count !== (int) $override) {
+                        $product->forceFill(['round_count' => (int) $override])->save();
+                    }
 
                     $cpr = $extractor->costPerRound((float) $product->wholesale_price, $roundCount);
                     $caliber = $master?->caliber ?? $attributes['caliber'];

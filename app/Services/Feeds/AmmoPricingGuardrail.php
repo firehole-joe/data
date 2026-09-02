@@ -34,7 +34,10 @@ class AmmoPricingGuardrail
         self::TIER_RIMFIRE => [0.02, 0.60],
         self::TIER_HANDGUN => [0.08, 3.50],
         self::TIER_RIFLE => [0.20, 8.00],
-        self::TIER_SHOTSHELL => [0.15, 5.00],
+        // Ceiling raised to accommodate premium tungsten / TSS waterfowl
+        // and turkey loads (e.g. Federal Premium TSS), which wholesale
+        // well above the old $5.00/rd lead-shot band.
+        self::TIER_SHOTSHELL => [0.15, 30.00],
         self::TIER_DEFAULT => [0.05, 10.00],
     ];
 
@@ -100,7 +103,7 @@ class AmmoPricingGuardrail
         [$min, $max] = self::TIER_BOUNDS[$tier];
 
         if ($roundCount <= 0) {
-            return $this->result(false, 0.0, "round count is {$roundCount} — cannot price");
+            return $this->result(false, 0.0, 'Could not parse round count');
         }
 
         $cpr = round($wholesalePrice / $roundCount, 4);
@@ -120,7 +123,7 @@ class AmmoPricingGuardrail
 
         if ($cpr > $max) {
             return $this->result(false, $cpr, sprintf(
-                '$%.4f/rd above the %s ceiling of $%.2f (%s over %d rds)',
+                '$%.4f/rd exceeds the %s ceiling of $%.2f (%s over %d rds)',
                 $cpr, $tier, $max, $this->money($wholesalePrice), $roundCount,
             ));
         }

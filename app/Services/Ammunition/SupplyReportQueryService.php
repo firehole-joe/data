@@ -102,6 +102,9 @@ class SupplyReportQueryService
         return DistributorProduct::query()
             ->join('master_ammunition', 'master_ammunition.id', '=', 'distributor_products.master_ammunition_id')
             ->where('master_ammunition.is_tracked_in_report', true)
+            // Reviewer-dismissed offerings are held out of every dashboard
+            // figure — the flagged view, the rollups and the stat cards.
+            ->where('distributor_products.is_ignored', false)
             ->when($filters['calibers'], fn ($q, $v) => $q->whereIn('master_ammunition.caliber', $v))
             ->when($filters['projectile_types'], fn ($q, $v) => $q->whereIn('master_ammunition.bullet_type', $v))
             ->when($filters['grain_weights'], fn ($q, $v) => $q->whereIn('master_ammunition.bullet_weight_gr', $v))
@@ -143,9 +146,12 @@ class SupplyReportQueryService
         // Offerings flagged `needs_review` carry a distrusted price and are
         // held out of every priced aggregate so a bad parse never distorts
         // the market spread; they still count toward SKU / pipeline totals.
+        // A reviewer-confirmed per-offering `round_count` overrides the
+        // master's rounds-per-box for pricing; NULL falls back to it.
+        $rounds = 'COALESCE(distributor_products.round_count, master_ammunition.rounds_per_box)';
         $priced = 'distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review';
-        $pricedCpr = $priced.' AND master_ammunition.rounds_per_box > 0';
-        $cprExpr = 'distributor_products.wholesale_price * 1.0 / master_ammunition.rounds_per_box';
+        $pricedCpr = $priced." AND {$rounds} > 0";
+        $cprExpr = "distributor_products.wholesale_price * 1.0 / {$rounds}";
 
         $agg = $this->baseOfferingQuery($filters)->toBase()
             ->selectRaw('COUNT(*) as offer_count')
@@ -211,8 +217,9 @@ class SupplyReportQueryService
         // `needs_review` offerings are excluded from the best-price / best-CPR
         // aggregates (their price is distrusted) but still contribute to the
         // aggregate quantity.
+        $rounds = 'COALESCE(distributor_products.round_count, master_ammunition.rounds_per_box)';
         $bestPriceExpr = 'MIN(CASE WHEN distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review THEN distributor_products.wholesale_price END)';
-        $bestCprExpr = 'MIN(CASE WHEN distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review AND master_ammunition.rounds_per_box > 0 THEN distributor_products.wholesale_price * 1.0 / master_ammunition.rounds_per_box END)';
+        $bestCprExpr = "MIN(CASE WHEN distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review AND {$rounds} > 0 THEN distributor_products.wholesale_price * 1.0 / {$rounds} END)";
         $totalQtyExpr = 'COALESCE(SUM(distributor_products.quantity_available), 0)';
 
         $grouped = $this->baseOfferingQuery($filters)->toBase()
@@ -398,7 +405,8 @@ class SupplyReportQueryService
         )->when(
             $filters['distributor_ids'] && $filters['distributor_mode'] === 'exclude',
             fn ($sub) => $sub->whereNotIn('distributor_id', $filters['distributor_ids']),
-        )->when($filters['stock_status'] === 'in_stock', fn ($sub) => $sub->where('is_in_stock', true))
+        )->where('is_ignored', false)
+            ->when($filters['stock_status'] === 'in_stock', fn ($sub) => $sub->where('is_in_stock', true))
             ->when($filters['stock_status'] === 'out_of_stock', fn ($sub) => $sub->where('is_in_stock', false))
             ->when($filters['review'] === 'flagged', fn ($sub) => $sub->where('needs_review', true))
             ->when($filters['review'] === 'clean', fn ($sub) => $sub->where('needs_review', false))
@@ -416,9 +424,14 @@ class SupplyReportQueryService
         $best = ($priced->isNotEmpty() ? $priced : $trustworthy)->sortBy('wholesale_price')->first();
         $roundsPerBox = (int) $master->rounds_per_box;
 
+        // Effective rounds-per-unit for a listing: a reviewer-confirmed
+        // per-offering count when present, otherwise the master's.
+        $effectiveRounds = fn ($l): int => (int) ($l->round_count ?: $roundsPerBox);
+        $bestRounds = $best ? $effectiveRounds($best) : 0;
+
         $master->best_price_per_box = $best ? (float) $best->wholesale_price : null;
-        $master->best_price_per_round = ($best && $roundsPerBox > 0 && (float) $best->wholesale_price > 0)
-            ? round((float) $best->wholesale_price / $roundsPerBox, 4)
+        $master->best_price_per_round = ($best && $bestRounds > 0 && (float) $best->wholesale_price > 0)
+            ? round((float) $best->wholesale_price / $bestRounds, 4)
             : null;
         $master->best_distributor_name = $best?->distributor?->name;
         $master->total_quantity_available = (int) $listings->sum('quantity_available');
@@ -434,11 +447,14 @@ class SupplyReportQueryService
             ->values();
 
         $master->offerings = $listings->map(fn ($l) => [
+            'id' => $l->id,
             'distributor' => $l->distributor?->name,
             'sku' => $l->distributor_sku,
+            'raw_description' => $l->raw_description,
             'dealer_cost' => (float) $l->wholesale_price,
-            'cpr' => ($roundsPerBox > 0 && (float) $l->wholesale_price > 0)
-                ? round((float) $l->wholesale_price / $roundsPerBox, 4)
+            'rounds_per_unit' => $effectiveRounds($l),
+            'cpr' => ($effectiveRounds($l) > 0 && (float) $l->wholesale_price > 0)
+                ? round((float) $l->wholesale_price / $effectiveRounds($l), 4)
                 : null,
             'qty' => (int) $l->quantity_available,
             'in_stock' => (bool) $l->is_in_stock,

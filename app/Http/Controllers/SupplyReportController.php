@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
+use App\Models\DistributorSkuOverride;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\SupplyReportQueryService;
 use Illuminate\Http\Request;
@@ -163,7 +164,69 @@ class SupplyReportController extends Controller
             'facets' => $query->facets($filters),
             'filters' => $filters,
             'perPageOptions' => SupplyReportQueryService::PER_PAGE_OPTIONS,
+            'canResolve' => $request->session()->get('feed_admin_authenticated') === true,
         ]);
+    }
+
+    /**
+     * Approve a flagged offering: pin the reviewer-confirmed rounds-per-
+     * unit count to the row, recompute its cost-per-round, clear the
+     * review flag, and record the count in `distributor_sku_overrides`
+     * so every future feed import re-applies it without re-flagging.
+     *
+     * The parent product's Best $/Box and Best $/Rd rollups and the
+     * FLAGGED count pill are derived live by {@see SupplyReportQueryService}
+     * on the next render, so a redirect back to the dashboard is enough
+     * to reflect the change.
+     */
+    public function approveOffering(Request $request, DistributorProduct $offering)
+    {
+        $validated = $request->validate([
+            'round_count' => ['required', 'integer', 'min:1', 'max:5000'],
+        ]);
+
+        $roundCount = (int) $validated['round_count'];
+        $price = (float) $offering->wholesale_price;
+
+        $offering->forceFill([
+            'round_count' => $roundCount,
+            'cost_per_round' => $price > 0 ? round($price / $roundCount, 4) : null,
+            'needs_review' => false,
+            'review_reason' => null,
+            'is_ignored' => false,
+        ])->save();
+
+        DistributorSkuOverride::updateOrCreate(
+            [
+                'distributor_id' => $offering->distributor_id,
+                'distributor_sku' => $offering->distributor_sku,
+            ],
+            [
+                'round_count' => $roundCount,
+                'note' => 'Approved from the supply dashboard review queue.',
+            ],
+        );
+
+        return redirect()
+            ->back(fallback: route('supply.dashboard'))
+            ->with('success', "Offering approved at {$roundCount} rounds/unit — future imports will use this count.");
+    }
+
+    /**
+     * Permanently dismiss a flagged offering: it is hidden from the
+     * flagged view and held out of every market calculation.
+     */
+    public function ignoreOffering(Request $request, DistributorProduct $offering)
+    {
+        $offering->forceFill([
+            'is_ignored' => true,
+            'needs_review' => false,
+            'review_reason' => null,
+        ])->save();
+
+        return redirect()
+            ->back(fallback: route('supply.dashboard'))
+            ->with('success', 'Offering ignored — it will stay out of the flagged view and market calculations.');
     }
 
     public function distributors()

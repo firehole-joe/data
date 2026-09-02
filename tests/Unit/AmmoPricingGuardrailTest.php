@@ -76,9 +76,12 @@ class AmmoPricingGuardrailTest extends TestCase
             'rifle on the ceiling' => [160.00, 20, '6.5 Creedmoor', true],
             'rifle above the ceiling' => [170.00, 20, '6.5 Creedmoor', false],
 
-            // Shotshell tier band is [0.15, 5.00].
+            // Shotshell tier band is [0.15, 30.00] — the ceiling is high
+            // enough for premium tungsten / TSS waterfowl and turkey loads.
             'shotshell on the floor' => [3.75, 25, '12 Gauge', true],
             'shotshell below the floor' => [3.00, 25, '12 Gauge', false],
+            'shotshell premium TSS under the raised ceiling' => [700.00, 25, '12 Gauge', true],
+            'shotshell above the raised ceiling' => [800.00, 25, '12 Gauge', false],
 
             // Default tier band is [0.05, 10.00].
             'unknown caliber within default band' => [50.00, 20, '.44 Magnum', true],
@@ -120,6 +123,7 @@ class AmmoPricingGuardrailTest extends TestCase
     {
         $this->assertSame([0.08, 3.50], $this->guardrail->boundsFor('9mm Luger'));
         $this->assertSame([0.02, 0.60], $this->guardrail->boundsFor('.22 LR'));
+        $this->assertSame([0.15, 30.00], $this->guardrail->boundsFor('12 Gauge'));
         $this->assertSame([0.05, 10.00], $this->guardrail->boundsFor('mystery'));
     }
 }

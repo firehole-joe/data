@@ -25,12 +25,14 @@ class DistributorProduct extends Model
         'raw_description',
         'wholesale_price',
         'cost_per_round',
+        'round_count',
         'map_price',
         'msrp_price',
         'quantity_available',
         'is_in_stock',
         'needs_review',
         'review_reason',
+        'is_ignored',
         'last_feed_update_at',
     ];
 
@@ -42,11 +44,13 @@ class DistributorProduct extends Model
     protected $casts = [
         'wholesale_price' => 'decimal:2',
         'cost_per_round' => 'decimal:4',
+        'round_count' => 'integer',
         'map_price' => 'decimal:2',
         'msrp_price' => 'decimal:2',
         'quantity_available' => 'integer',
         'is_in_stock' => 'boolean',
         'needs_review' => 'boolean',
+        'is_ignored' => 'boolean',
         'last_feed_update_at' => 'datetime',
     ];
 

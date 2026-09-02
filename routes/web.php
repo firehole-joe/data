@@ -37,4 +37,12 @@ Route::middleware('feed.admin')->group(function () {
         ->name('distributors.test');
     Route::post('/distributors/{distributor:slug}/sync', [DistributorAdminController::class, 'manualSync'])
         ->name('distributors.sync');
+
+    /*
+    | Flagged-offering review resolution (from the dashboard drawer).
+    */
+    Route::patch('/offerings/{offering}/approve', [SupplyReportController::class, 'approveOffering'])
+        ->name('supply.offerings.approve');
+    Route::patch('/offerings/{offering}/ignore', [SupplyReportController::class, 'ignoreOffering'])
+        ->name('supply.offerings.ignore');
 });

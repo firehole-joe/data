@@ -4,8 +4,10 @@ namespace App\Services\Feeds;
 
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
+use App\Models\DistributorSkuOverride;
 use App\Models\FeedRun;
 use App\Models\PriceHistory;
+use App\Services\Ammunition\AmmoAttributeExtractor;
 use App\Services\Feeds\Contracts\FeedDriverInterface;
 use App\Services\Feeds\DTOs\FeedItemDTO;
 use App\Services\Matching\ProductMatchingService;
@@ -36,7 +38,11 @@ class FeedIngestionService
         'is_in_stock',
     ];
 
-    public function __construct(private readonly ProductMatchingService $matcher) {}
+    public function __construct(
+        private readonly ProductMatchingService $matcher,
+        private readonly AmmoAttributeExtractor $extractor,
+        private readonly AmmoPricingGuardrail $guardrail,
+    ) {}
 
     public function ingest(Distributor $distributor, bool $dryRun = false): FeedRun
     {
@@ -168,6 +174,7 @@ class FeedIngestionService
         $product->save();
 
         $this->matchIngestedProduct($product);
+        $this->applyPricingGuardrail($product);
 
         PriceHistory::updateOrCreate(
             [
@@ -201,6 +208,99 @@ class FeedIngestionService
                 'distributor_product_id' => $product->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Run the freshly upserted offering through the pricing guardrail and
+     * record the outcome on the row: a specific `review_reason` and
+     * `needs_review = true` when the computed $/round falls outside the
+     * caliber-tier sanity band (or no round count could be parsed), a
+     * cleared flag when it now passes.
+     *
+     * The resolved round count prefers, in order: a reviewer-confirmed
+     * {@see DistributorSkuOverride}, a count already stored on the row
+     * from a past approval, an explicit packaging count in the
+     * description / SKU, the mapped master's rounds-per-box, and finally
+     * the caliber-family default. Ignored offerings are skipped entirely.
+     */
+    private function applyPricingGuardrail(DistributorProduct $product): void
+    {
+        if ($product->is_ignored) {
+            if ($product->needs_review) {
+                $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+            }
+
+            return;
+        }
+
+        $product->loadMissing('masterAmmunition');
+        $master = $product->masterAmmunition;
+
+        $attributes = $this->extractor->extract(
+            (string) $product->raw_description,
+            (float) $product->wholesale_price,
+            (string) $product->distributor_sku,
+        );
+
+        $override = DistributorSkuOverride::query()
+            ->where('distributor_id', $product->distributor_id)
+            ->where('distributor_sku', $product->distributor_sku)
+            ->value('round_count');
+
+        $roundCount = $override
+            ?? $product->round_count
+            ?? ($attributes['round_count_explicit']
+                ? $attributes['round_count']
+                : (($master && (int) $master->rounds_per_box > 0)
+                    ? (int) $master->rounds_per_box
+                    : $attributes['round_count']));
+        $roundCount = (int) $roundCount;
+
+        // A confirmed override is authoritative — pin it to the row so the
+        // dashboard rollups price against the same count between imports.
+        if ($override !== null && (int) $product->round_count !== (int) $override) {
+            $product->round_count = (int) $override;
+        }
+
+        $caliber = $master?->caliber ?? $attributes['caliber'];
+
+        $cpr = $this->extractor->costPerRound((float) $product->wholesale_price, $roundCount);
+        if ($cpr !== null) {
+            $product->cost_per_round = $cpr;
+        }
+
+        $check = $this->guardrail->validate((float) $product->wholesale_price, $roundCount, $caliber);
+
+        if (! $check['is_valid']) {
+            $product->forceFill([
+                'needs_review' => true,
+                'review_reason' => $check['reason'],
+            ])->save();
+
+            Log::channel('daily')->warning('ammo.pricing.out_of_band', [
+                'distributor_id' => $product->distributor_id,
+                'distributor_product_id' => $product->id,
+                'distributor_sku' => $product->distributor_sku,
+                'raw_description' => $product->raw_description,
+                'caliber' => $caliber,
+                'parsed_round_count' => $roundCount,
+                'wholesale_price' => (float) $product->wholesale_price,
+                'cost_per_round' => $check['cost_per_round'],
+                'reason' => $check['reason'],
+            ]);
+
+            return;
+        }
+
+        if ($product->needs_review) {
+            $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+
+            return;
+        }
+
+        if ($product->isDirty()) {
+            $product->save();
         }
     }
 

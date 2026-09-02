@@ -393,6 +393,58 @@
                                         @endforeach
                                     </tbody>
                                 </table>
+
+                                {{-- Flagged-offering diagnostics + inline resolution --}}
+                                @php $flaggedHere = collect($master->offerings)->where('needs_review', true)->values(); @endphp
+                                @if ($flaggedHere->isNotEmpty())
+                                    <div class="mt-3 space-y-3">
+                                        @foreach ($flaggedHere as $offering)
+                                            <div data-review-panel class="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3">
+                                                <x-ui.alert variant="warning" fill="soft">
+                                                    <p class="font-semibold">{{ $offering['review_reason'] ?: 'Flagged for review — reason not recorded.' }}</p>
+                                                    <dl class="mt-1.5 space-y-0.5 text-[12px]">
+                                                        <div class="flex gap-1.5">
+                                                            <dt class="shrink-0 font-medium">SKU</dt>
+                                                            <dd class="tabular-nums">{{ $offering['sku'] ?: '—' }}</dd>
+                                                        </div>
+                                                        <div class="flex gap-1.5">
+                                                            <dt class="shrink-0 font-medium">Raw feed description</dt>
+                                                            <dd>{{ $offering['raw_description'] ?: '—' }}</dd>
+                                                        </div>
+                                                    </dl>
+                                                </x-ui.alert>
+
+                                                @if ($canResolve)
+                                                    <div class="mt-2.5 flex flex-wrap items-end gap-x-4 gap-y-2">
+                                                        <label class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                                                            Rounds per Unit
+                                                            <input
+                                                                type="number" name="round_count" min="1" max="5000" required
+                                                                form="ammo-approve-{{ $offering['id'] }}"
+                                                                value="{{ $offering['rounds_per_unit'] }}"
+                                                                data-review-rounds
+                                                                data-dealer-cost="{{ $offering['dealer_cost'] }}"
+                                                                class="w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-[13px] tabular-nums text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 dark:bg-surface-2">
+                                                        </label>
+
+                                                        <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                                                            Recalculated $ / Round
+                                                            <span class="text-[15px] font-semibold tabular-nums text-ink" data-review-cpr>—</span>
+                                                        </div>
+
+                                                        <x-ui.button type="submit" size="sm" variant="primary" form="ammo-approve-{{ $offering['id'] }}">Approve</x-ui.button>
+                                                        <x-ui.button type="submit" size="sm" variant="ghost" form="ammo-ignore-{{ $offering['id'] }}">Ignore</x-ui.button>
+                                                    </div>
+                                                @else
+                                                    <p class="mt-2 text-[12px] text-ink-subtle">
+                                                        <a href="{{ route('admin.unlock') }}" class="font-medium underline">Unlock feed admin</a>
+                                                        to approve or ignore this offering.
+                                                    </p>
+                                                @endif
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                @endif
                             </div>
                         </td>
                     </tr>
@@ -413,6 +465,32 @@
         {{ $masters->links() }}
     </div>
 </form>
+
+{{--
+    Review-resolution forms live OUTSIDE #supply-filters (the whole page is
+    one GET form and forms cannot nest). The drawer controls associate with
+    them via the HTML `form="…"` attribute.
+--}}
+@if ($canResolve)
+    @php
+        $flaggedOfferings = collect($masters->items())
+            ->flatMap(fn ($m) => collect($m->offerings ?? [])->where('needs_review', true)->all());
+    @endphp
+    @if ($flaggedOfferings->isNotEmpty())
+        <div hidden>
+            @foreach ($flaggedOfferings as $offering)
+                <form id="ammo-approve-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.approve', $offering['id']) }}">
+                    @csrf
+                    @method('PATCH')
+                </form>
+                <form id="ammo-ignore-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.ignore', $offering['id']) }}">
+                    @csrf
+                    @method('PATCH')
+                </form>
+            @endforeach
+        </div>
+    @endif
+@endif
 @endsection
 
 @push('scripts')
@@ -469,6 +547,21 @@
                 trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
                 if (chevron) chevron.classList.toggle('rotate-180', open);
             });
+        });
+
+        // Flagged-offering resolution: live $/round as the count changes.
+        form.querySelectorAll('[data-review-panel]').forEach(function (panel) {
+            var input = panel.querySelector('[data-review-rounds]');
+            var out = panel.querySelector('[data-review-cpr]');
+            if (!input || !out) return;
+
+            var cost = parseFloat(input.getAttribute('data-dealer-cost')) || 0;
+            function recalc() {
+                var n = parseInt(input.value, 10);
+                out.textContent = (n > 0 && cost > 0) ? '$' + (cost / n).toFixed(4) : '—';
+            }
+            input.addEventListener('input', recalc);
+            recalc();
         });
 
         // Expandable table rows (per-master distributor offerings).
