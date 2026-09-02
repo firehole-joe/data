@@ -4,9 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
-use App\Models\DistributorSkuOverride;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\SupplyReportQueryService;
+use App\Services\Feeds\DistributorSkuOverrideManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -179,8 +179,11 @@ class SupplyReportController extends Controller
      * on the next render, so a redirect back to the dashboard is enough
      * to reflect the change.
      */
-    public function approveOffering(Request $request, DistributorProduct $offering)
-    {
+    public function approveOffering(
+        Request $request,
+        DistributorProduct $offering,
+        DistributorSkuOverrideManager $overrides,
+    ) {
         $validated = $request->validate([
             'round_count' => ['required', 'integer', 'min:1', 'max:5000'],
         ]);
@@ -196,16 +199,10 @@ class SupplyReportController extends Controller
             'is_ignored' => false,
         ])->save();
 
-        DistributorSkuOverride::updateOrCreate(
-            [
-                'distributor_id' => $offering->distributor_id,
-                'distributor_sku' => $offering->distributor_sku,
-            ],
-            [
-                'round_count' => $roundCount,
-                'note' => 'Approved from the supply dashboard review queue.',
-            ],
-        );
+        // Durable ledger entry keyed by distributor SKU + UPC, with a
+        // price / description snapshot so a later import only resurfaces
+        // this listing if the data drifts materially.
+        $overrides->recordApproved($offering, $roundCount);
 
         return redirect()
             ->back(fallback: route('supply.dashboard'))
@@ -214,19 +211,65 @@ class SupplyReportController extends Controller
 
     /**
      * Permanently dismiss a flagged offering: it is hidden from the
-     * flagged view and held out of every market calculation.
+     * flagged view, held out of every market calculation, and recorded in
+     * the durable override ledger so it stays dismissed across future
+     * feed imports (matched by UPC or distributor SKU).
      */
-    public function ignoreOffering(Request $request, DistributorProduct $offering)
-    {
+    public function ignoreOffering(
+        Request $request,
+        DistributorProduct $offering,
+        DistributorSkuOverrideManager $overrides,
+    ) {
         $offering->forceFill([
             'is_ignored' => true,
             'needs_review' => false,
             'review_reason' => null,
         ])->save();
 
+        $overrides->recordIgnored($offering);
+
         return redirect()
             ->back(fallback: route('supply.dashboard'))
             ->with('success', 'Offering ignored — it will stay out of the flagged view and market calculations.');
+    }
+
+    /**
+     * Bulk-dismiss every offering still flagged for review within the
+     * active dashboard filter selection: each is marked `is_ignored`,
+     * cleared of its review flag, and written to the durable override
+     * ledger so it stays dismissed across future feed imports.
+     */
+    public function ignoreAllOfferings(
+        Request $request,
+        SupplyReportQueryService $query,
+        DistributorSkuOverrideManager $overrides,
+    ) {
+        $filters = $query->normalizeFilters($request);
+
+        $flagged = $query->baseOfferingQuery($filters)
+            ->where('distributor_products.needs_review', true)
+            ->select('distributor_products.*')
+            ->with('masterAmmunition')
+            ->get();
+
+        $count = 0;
+
+        DB::transaction(function () use ($flagged, $overrides, &$count) {
+            foreach ($flagged as $offering) {
+                $offering->forceFill([
+                    'is_ignored' => true,
+                    'needs_review' => false,
+                    'review_reason' => null,
+                ])->save();
+
+                $overrides->recordIgnored($offering);
+                $count++;
+            }
+        });
+
+        return redirect()
+            ->back(fallback: route('supply.dashboard', ['review' => 'flagged']))
+            ->with('success', "Successfully ignored {$count} reviewable item".($count === 1 ? '' : 's').'.');
     }
 
     public function distributors()

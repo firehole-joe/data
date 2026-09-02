@@ -74,6 +74,33 @@
     </div>
 
     {{-- ---------------------------------------------------------------- --}}
+    {{-- Flagged-review banner + bulk action --}}
+    {{-- ---------------------------------------------------------------- --}}
+    @if ($filters['review'] === 'flagged')
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5">
+            <div class="flex items-center gap-2 text-[12px] font-medium text-amber-800 dark:text-amber-200">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                <span>
+                    {{ number_format($stats['needs_review'] ?? 0) }}
+                    offering{{ ($stats['needs_review'] ?? 0) === 1 ? '' : 's' }} flagged for review in this selection.
+                    @unless ($canResolve)
+                        <a href="{{ route('admin.unlock') }}" class="underline">Unlock feed admin</a> to resolve.
+                    @endunless
+                </span>
+            </div>
+            @if ($canResolve && ($stats['needs_review'] ?? 0) > 0)
+                <x-ui.button
+                    type="submit"
+                    form="ammo-ignore-all"
+                    variant="danger"
+                    size="sm"
+                    onclick="return confirm('Ignore all {{ $stats['needs_review'] }} flagged offering(s) in this selection? They will be held out of the review queue and market calculations, and stay ignored on future feed imports.');"
+                >Ignore All Remaining ({{ number_format($stats['needs_review']) }})</x-ui.button>
+            @endif
+        </div>
+    @endif
+
+    {{-- ---------------------------------------------------------------- --}}
     {{-- Dynamic stat cards --}}
     {{-- ---------------------------------------------------------------- --}}
     <div class="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -476,20 +503,26 @@
         $flaggedOfferings = collect($masters->items())
             ->flatMap(fn ($m) => collect($m->offerings ?? [])->where('needs_review', true)->all());
     @endphp
-    @if ($flaggedOfferings->isNotEmpty())
-        <div hidden>
-            @foreach ($flaggedOfferings as $offering)
-                <form id="ammo-approve-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.approve', $offering['id']) }}">
-                    @csrf
-                    @method('PATCH')
-                </form>
-                <form id="ammo-ignore-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.ignore', $offering['id']) }}">
-                    @csrf
-                    @method('PATCH')
-                </form>
-            @endforeach
-        </div>
-    @endif
+    <div hidden>
+        @if ($filters['review'] === 'flagged')
+            {{-- Carries the active filter query string so the bulk action
+                 matches exactly what the reviewer is looking at. --}}
+            <form id="ammo-ignore-all" method="POST" action="{{ route('supply.offerings.ignore_all', request()->query()) }}">
+                @csrf
+            </form>
+        @endif
+
+        @foreach ($flaggedOfferings as $offering)
+            <form id="ammo-approve-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.approve', $offering['id']) }}">
+                @csrf
+                @method('PATCH')
+            </form>
+            <form id="ammo-ignore-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.ignore', $offering['id']) }}">
+                @csrf
+                @method('PATCH')
+            </form>
+        @endforeach
+    </div>
 @endif
 @endsection
 

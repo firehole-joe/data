@@ -3,10 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Models\DistributorProduct;
-use App\Models\DistributorSkuOverride;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\AmmoAttributeExtractor;
 use App\Services\Feeds\AmmoPricingGuardrail;
+use App\Services\Feeds\DistributorSkuOverrideManager;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
@@ -27,8 +27,11 @@ class BackfillAmmoAttributesCommand extends Command
      */
     protected $description = 'Reprocess distributor offerings: re-extract caliber / projectile / grain / round-count, correct box-vs-case round counts, recompute cost-per-round, and run the pricing guardrail (flagging offerings whose $/round falls outside the caliber-tier sanity band for review).';
 
-    public function handle(AmmoAttributeExtractor $extractor, AmmoPricingGuardrail $guardrail): int
-    {
+    public function handle(
+        AmmoAttributeExtractor $extractor,
+        AmmoPricingGuardrail $guardrail,
+        DistributorSkuOverrideManager $overrides,
+    ): int {
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
         $chunk = max(1, (int) $this->option('chunk'));
@@ -64,6 +67,8 @@ class BackfillAmmoAttributesCommand extends Command
             'master_fields' => 0,
             'flagged' => 0,
             'cleared' => 0,
+            'ignored' => 0,
+            'overrides_applied' => 0,
         ];
 
         $bar = $this->output->createProgressBar($total);
@@ -72,10 +77,31 @@ class BackfillAmmoAttributesCommand extends Command
         $scope(DistributorProduct::query())
             ->with(['masterAmmunition', 'distributor'])
             ->orderBy('id')
-            ->chunkById($chunk, function ($products) use ($extractor, $guardrail, $dryRun, $force, &$stats, $bar) {
+            ->chunkById($chunk, function ($products) use ($extractor, $guardrail, $overrides, $dryRun, $force, &$stats, $bar) {
                 foreach ($products as $product) {
                     $stats['processed']++;
                     $bar->advance();
+
+                    $master = $product->masterAmmunition;
+                    $decision = $overrides->resolve($product);
+
+                    // A ledgered "ignore" (by distributor SKU or by UPC)
+                    // bypasses the review quarantine on every reprocess.
+                    if ($product->is_ignored || $decision['ignored']) {
+                        if (! $dryRun && ($decision['ignored'] && ! $product->is_ignored
+                            || $product->needs_review || $product->review_reason !== null)) {
+                            $product->forceFill([
+                                'is_ignored' => true,
+                                'needs_review' => false,
+                                'review_reason' => null,
+                            ])->save();
+                        }
+                        if ($decision['ignored']) {
+                            $stats['ignored']++;
+                        }
+
+                        continue;
+                    }
 
                     $attributes = $extractor->extract(
                         (string) $product->raw_description,
@@ -83,22 +109,36 @@ class BackfillAmmoAttributesCommand extends Command
                         (string) $product->distributor_sku,
                     );
 
-                    $master = $product->masterAmmunition;
+                    $caliber = $master?->caliber ?? $attributes['caliber'];
+                    $approvedCount = $decision['round_count'];
 
-                    // A reviewer-confirmed override for this distributor SKU
-                    // (or a count already pinned to the row from a past
-                    // approval) is authoritative — future imports must price
-                    // against it and never re-flag it for the same fault.
-                    $override = DistributorSkuOverride::query()
-                        ->where('distributor_id', $product->distributor_id)
-                        ->where('distributor_sku', $product->distributor_sku)
-                        ->value('round_count');
+                    // An approved listing whose price / packaging has
+                    // drifted materially since sign-off goes back into the
+                    // queue rather than silently re-applying a stale fix.
+                    if ($approvedCount !== null && $decision['resurface']) {
+                        $stats['flagged']++;
+                        if (! $dryRun) {
+                            $product->forceFill([
+                                'round_count' => $approvedCount,
+                                'needs_review' => true,
+                                'review_reason' => $decision['reason'],
+                            ])->save();
+                        }
+                        Log::channel('daily')->warning('ammo.override.drift', [
+                            'distributor' => $product->distributor?->slug,
+                            'distributor_product_id' => $product->id,
+                            'distributor_sku' => $product->distributor_sku,
+                            'reason' => $decision['reason'],
+                        ]);
+
+                        continue;
+                    }
 
                     // Otherwise an explicit packaging count from the
                     // description / SKU (e.g. "50/1000" box/case slash
                     // notation) is the most reliable signal and overrides a
                     // possibly stale master.
-                    $roundCount = (int) ($override
+                    $roundCount = (int) ($approvedCount
                         ?? $product->round_count
                         ?? ($attributes['round_count_explicit']
                             ? $attributes['round_count']
@@ -106,12 +146,11 @@ class BackfillAmmoAttributesCommand extends Command
                                 ? (int) $master->rounds_per_box
                                 : $attributes['round_count'])));
 
-                    if ($override !== null && ! $dryRun && (int) $product->round_count !== (int) $override) {
-                        $product->forceFill(['round_count' => (int) $override])->save();
+                    if ($approvedCount !== null && ! $dryRun && (int) $product->round_count !== $approvedCount) {
+                        $product->forceFill(['round_count' => $approvedCount])->save();
                     }
 
                     $cpr = $extractor->costPerRound((float) $product->wholesale_price, $roundCount);
-                    $caliber = $master?->caliber ?? $attributes['caliber'];
 
                     if ($cpr !== null && $this->differs($product->cost_per_round, $cpr)) {
                         $stats['cpr_set']++;
@@ -120,35 +159,45 @@ class BackfillAmmoAttributesCommand extends Command
                         }
                     }
 
-                    // Pricing guardrail: hold offerings whose $/round lands
-                    // outside the caliber-tier sanity band (or that have no
-                    // usable round count) out of the market averages until
-                    // a human confirms or corrects them.
-                    $check = $guardrail->validate((float) $product->wholesale_price, $roundCount, $caliber);
-
-                    if (! $check['is_valid']) {
-                        $stats['flagged']++;
-                        if (! $dryRun && (! $product->needs_review || $product->review_reason !== $check['reason'])) {
-                            $product->forceFill([
-                                'needs_review' => true,
-                                'review_reason' => $check['reason'],
-                            ])->save();
-                        }
-                        Log::channel('daily')->warning('ammo.pricing.out_of_band', [
-                            'distributor' => $product->distributor?->slug,
-                            'distributor_product_id' => $product->id,
-                            'distributor_sku' => $product->distributor_sku,
-                            'raw_description' => $product->raw_description,
-                            'caliber' => $caliber,
-                            'parsed_round_count' => $roundCount,
-                            'wholesale_price' => (float) $product->wholesale_price,
-                            'cost_per_round' => $check['cost_per_round'],
-                            'reason' => $check['reason'],
-                        ]);
-                    } elseif ($product->needs_review) {
-                        $stats['cleared']++;
-                        if (! $dryRun) {
+                    // A stable approved override is trusted outright — the
+                    // guardrail does not get to overrule a human sign-off.
+                    if ($approvedCount !== null) {
+                        $stats['overrides_applied']++;
+                        if (! $dryRun && ($product->needs_review || $product->review_reason !== null)) {
+                            $stats['cleared']++;
                             $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+                        }
+                    } else {
+                        // Pricing guardrail: hold offerings whose $/round
+                        // lands outside the caliber-tier sanity band (or
+                        // that have no usable round count) out of the
+                        // market averages until a human confirms them.
+                        $check = $guardrail->validate((float) $product->wholesale_price, $roundCount, $caliber);
+
+                        if (! $check['is_valid']) {
+                            $stats['flagged']++;
+                            if (! $dryRun && (! $product->needs_review || $product->review_reason !== $check['reason'])) {
+                                $product->forceFill([
+                                    'needs_review' => true,
+                                    'review_reason' => $check['reason'],
+                                ])->save();
+                            }
+                            Log::channel('daily')->warning('ammo.pricing.out_of_band', [
+                                'distributor' => $product->distributor?->slug,
+                                'distributor_product_id' => $product->id,
+                                'distributor_sku' => $product->distributor_sku,
+                                'raw_description' => $product->raw_description,
+                                'caliber' => $caliber,
+                                'parsed_round_count' => $roundCount,
+                                'wholesale_price' => (float) $product->wholesale_price,
+                                'cost_per_round' => $check['cost_per_round'],
+                                'reason' => $check['reason'],
+                            ]);
+                        } elseif ($product->needs_review) {
+                            $stats['cleared']++;
+                            if (! $dryRun) {
+                                $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+                            }
                         }
                     }
 
@@ -172,6 +221,8 @@ class BackfillAmmoAttributesCommand extends Command
                 ['Cost-per-round values written', number_format($stats['cpr_set'])],
                 ['Master records enriched', number_format($stats['masters_enriched'])],
                 ['Master fields filled', number_format($stats['master_fields'])],
+                ['Approved overrides re-applied', number_format($stats['overrides_applied'])],
+                ['Ignored via override ledger', number_format($stats['ignored'])],
                 ['Flagged for review (price out of band)', number_format($stats['flagged'])],
                 ['Review flags cleared', number_format($stats['cleared'])],
             ],

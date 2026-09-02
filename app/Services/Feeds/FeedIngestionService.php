@@ -4,7 +4,6 @@ namespace App\Services\Feeds;
 
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
-use App\Models\DistributorSkuOverride;
 use App\Models\FeedRun;
 use App\Models\PriceHistory;
 use App\Services\Ammunition\AmmoAttributeExtractor;
@@ -42,6 +41,7 @@ class FeedIngestionService
         private readonly ProductMatchingService $matcher,
         private readonly AmmoAttributeExtractor $extractor,
         private readonly AmmoPricingGuardrail $guardrail,
+        private readonly DistributorSkuOverrideManager $overrides,
     ) {}
 
     public function ingest(Distributor $distributor, bool $dryRun = false): FeedRun
@@ -212,30 +212,51 @@ class FeedIngestionService
     }
 
     /**
-     * Run the freshly upserted offering through the pricing guardrail and
-     * record the outcome on the row: a specific `review_reason` and
-     * `needs_review = true` when the computed $/round falls outside the
-     * caliber-tier sanity band (or no round count could be parsed), a
-     * cleared flag when it now passes.
+     * Apply the durable review ledger and the pricing guardrail to the
+     * freshly upserted offering:
      *
-     * The resolved round count prefers, in order: a reviewer-confirmed
-     * {@see DistributorSkuOverride}, a count already stored on the row
-     * from a past approval, an explicit packaging count in the
-     * description / SKU, the mapped master's rounds-per-box, and finally
-     * the caliber-family default. Ignored offerings are skipped entirely.
+     *  - A ledgered "ignore" (matched by distributor SKU or by UPC)
+     *    bypasses the quarantine outright — `is_ignored` is asserted and
+     *    any review flag cleared.
+     *  - A ledgered "approve at N rounds/unit" pins that count and, as
+     *    long as the wholesale cost and packaging string have not drifted
+     *    materially from the decision snapshot, is trusted without a
+     *    second guardrail pass. A material drift re-quarantines it.
+     *  - Otherwise the guardrail runs as normal: `needs_review` +
+     *    `review_reason` when the computed $/round is out of band (or no
+     *    round count could be parsed), a cleared flag when it now passes.
+     *
+     * Absent a ledger decision the resolved round count prefers, in
+     * order: a count already pinned to the row, an explicit packaging
+     * count in the description / SKU, the mapped master's rounds-per-box,
+     * then the caliber-family default.
      */
     private function applyPricingGuardrail(DistributorProduct $product): void
     {
+        $product->loadMissing('masterAmmunition');
+        $master = $product->masterAmmunition;
+
+        // Already dismissed on the row: keep it out of the queue without
+        // disturbing the ledger.
         if ($product->is_ignored) {
-            if ($product->needs_review) {
+            if ($product->needs_review || $product->review_reason !== null) {
                 $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
             }
 
             return;
         }
 
-        $product->loadMissing('masterAmmunition');
-        $master = $product->masterAmmunition;
+        $decision = $this->overrides->resolve($product);
+
+        if ($decision['ignored']) {
+            $product->forceFill([
+                'is_ignored' => true,
+                'needs_review' => false,
+                'review_reason' => null,
+            ])->save();
+
+            return;
+        }
 
         $attributes = $this->extractor->extract(
             (string) $product->raw_description,
@@ -243,31 +264,51 @@ class FeedIngestionService
             (string) $product->distributor_sku,
         );
 
-        $override = DistributorSkuOverride::query()
-            ->where('distributor_id', $product->distributor_id)
-            ->where('distributor_sku', $product->distributor_sku)
-            ->value('round_count');
+        $approvedCount = $decision['round_count'];
+        $caliber = $master?->caliber ?? $attributes['caliber'];
 
-        $roundCount = $override
+        // Approved, but the listing has drifted since sign-off — send it
+        // back for a fresh look rather than trusting a stale correction.
+        if ($approvedCount !== null && $decision['resurface']) {
+            $product->forceFill([
+                'round_count' => $approvedCount,
+                'needs_review' => true,
+                'review_reason' => $decision['reason'],
+            ])->save();
+
+            Log::channel('daily')->warning('ammo.override.drift', [
+                'distributor_id' => $product->distributor_id,
+                'distributor_product_id' => $product->id,
+                'distributor_sku' => $product->distributor_sku,
+                'reason' => $decision['reason'],
+            ]);
+
+            return;
+        }
+
+        $roundCount = (int) ($approvedCount
             ?? $product->round_count
             ?? ($attributes['round_count_explicit']
                 ? $attributes['round_count']
                 : (($master && (int) $master->rounds_per_box > 0)
                     ? (int) $master->rounds_per_box
-                    : $attributes['round_count']));
-        $roundCount = (int) $roundCount;
+                    : $attributes['round_count'])));
 
-        // A confirmed override is authoritative — pin it to the row so the
-        // dashboard rollups price against the same count between imports.
-        if ($override !== null && (int) $product->round_count !== (int) $override) {
-            $product->round_count = (int) $override;
+        if ($approvedCount !== null && (int) $product->round_count !== $approvedCount) {
+            $product->round_count = $approvedCount;
         }
-
-        $caliber = $master?->caliber ?? $attributes['caliber'];
 
         $cpr = $this->extractor->costPerRound((float) $product->wholesale_price, $roundCount);
         if ($cpr !== null) {
             $product->cost_per_round = $cpr;
+        }
+
+        // A stable approved override is trusted outright: a human has
+        // signed off and nothing material has moved.
+        if ($approvedCount !== null) {
+            $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+
+            return;
         }
 
         $check = $this->guardrail->validate((float) $product->wholesale_price, $roundCount, $caliber);
