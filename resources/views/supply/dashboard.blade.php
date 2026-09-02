@@ -14,7 +14,7 @@
     $selectedDistributors = $filters['distributor_ids'];
 
     $hasActiveFilters = $selectedCalibers || $selectedProjectiles || $selectedGrains || $selectedDistributors
-        || $filters['stock_status'] !== 'all' || $filters['min_qty'] > 0 || $filters['search'] !== ''
+        || $filters['stock_status'] !== 'all' || $filters['review'] !== 'all' || $filters['min_qty'] > 0 || $filters['search'] !== ''
         || $filters['per_page'] !== SupplyReportQueryService::DEFAULT_PER_PAGE
         || $filters['sort_by'] !== 'manufacturer' || $filters['sort_dir'] !== 'asc';
 
@@ -57,6 +57,13 @@
                 &middot; {{ number_format($stats['pipeline_rounds']) }} rounds across
                 {{ number_format($stats['offer_count']) }} offering{{ $stats['offer_count'] === 1 ? '' : 's' }}
             </p>
+            @if (($stats['needs_review'] ?? 0) > 0 && $filters['review'] !== 'flagged')
+                <a href="{{ route('supply.dashboard', ['review' => 'flagged']) }}"
+                    class="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 transition hover:bg-amber-500/20 dark:text-amber-300">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                    {{ number_format($stats['needs_review']) }} offering{{ $stats['needs_review'] === 1 ? '' : 's' }} flagged for review
+                </a>
+            @endif
         </div>
         <div class="flex items-center gap-2">
             <x-ui.button type="submit" variant="primary" size="sm">Apply filters</x-ui.button>
@@ -144,6 +151,24 @@
                         <label class="cursor-pointer select-none">
                             <input type="radio" name="stock_status" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
                             <span class="inline-flex items-center rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">{{ $label }}</span>
+                        </label>
+                    @endforeach
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                Review
+                <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Review status">
+                    @foreach (['all' => 'All', 'clean' => 'Passed', 'flagged' => 'Flagged'] as $value => $label)
+                        @php $on = $filters['review'] === $value; @endphp
+                        <label class="cursor-pointer select-none">
+                            <input type="radio" name="review" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                            <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
+                                {{ $label }}
+                                @if ($value === 'flagged' && ($stats['needs_review'] ?? 0) > 0)
+                                    <span class="rounded-full bg-amber-500/20 px-1 text-[9px] tabular-nums text-amber-700 dark:text-amber-300">{{ number_format($stats['needs_review']) }}</span>
+                                @endif
+                            </span>
                         </label>
                     @endforeach
                 </div>
@@ -311,6 +336,12 @@
                                         {{ $badge['name'] }}
                                     </x-ui.badge>
                                 @endforeach
+                                @if (($master->review_count ?? 0) > 0)
+                                    <span class="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                                        title="{{ $master->review_count }} offering(s) flagged — price held out of the best-price rollup">
+                                        {{ $master->review_count }} review
+                                    </span>
+                                @endif
                             </div>
                         </td>
                     </tr>
@@ -329,15 +360,16 @@
                                             <th class="py-1 pr-3 text-right font-semibold">$ / Round</th>
                                             <th class="py-1 pr-3 text-right font-semibold">Stock Qty</th>
                                             <th class="py-1 pr-3 font-semibold">Last Updated</th>
+                                            <th class="py-1 pr-3 font-semibold">Review</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @foreach ($master->offerings as $offering)
-                                            <tr class="border-t border-line/60">
+                                            <tr class="border-t border-line/60 {{ $offering['needs_review'] ? 'bg-amber-500/5' : '' }}">
                                                 <td class="py-1 pr-3 text-ink">{{ $offering['distributor'] ?? '—' }}</td>
                                                 <td class="py-1 pr-3 tabular-nums text-ink-muted">{{ $offering['sku'] }}</td>
                                                 <td class="py-1 pr-3 text-right tabular-nums">{{ $money($offering['dealer_cost'], 2) }}</td>
-                                                <td class="py-1 pr-3 text-right tabular-nums">{{ $offering['cpr'] !== null ? $money($offering['cpr'], 4) : '—' }}</td>
+                                                <td class="py-1 pr-3 text-right tabular-nums {{ $offering['needs_review'] ? 'text-ink-subtle line-through' : '' }}">{{ $offering['cpr'] !== null ? $money($offering['cpr'], 4) : '—' }}</td>
                                                 <td class="py-1 pr-3 text-right tabular-nums">
                                                     {{ number_format($offering['qty']) }}
                                                     @unless ($offering['in_stock'])
@@ -346,6 +378,16 @@
                                                 </td>
                                                 <td class="py-1 pr-3 text-ink-muted">
                                                     {{ $offering['updated_at'] ? \Illuminate\Support\Carbon::parse($offering['updated_at'])->diffForHumans() : '—' }}
+                                                </td>
+                                                <td class="py-1 pr-3">
+                                                    @if ($offering['needs_review'])
+                                                        <span
+                                                            class="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                                                            title="{{ $offering['review_reason'] }}"
+                                                        >Review</span>
+                                                    @else
+                                                        <span class="text-[9px] text-ink-subtle">ok</span>
+                                                    @endif
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -404,8 +446,8 @@
                 if (name === 'search' || name === 'min_qty') {
                     var input = form.querySelector('[name="' + name + '"]');
                     if (input) input.value = '';
-                } else if (name === 'stock_status') {
-                    var radio = form.querySelector('[name="stock_status"][value="all"]');
+                } else if (name === 'stock_status' || name === 'review') {
+                    var radio = form.querySelector('[name="' + name + '"][value="' + value + '"]');
                     if (radio) radio.checked = true;
                 } else {
                     var box = form.querySelector('[name="' + name + '[]"][value="' + value + '"]');

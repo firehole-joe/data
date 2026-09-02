@@ -20,6 +20,7 @@
                 <x-ui.table.th>Last Synced</x-ui.table.th>
                 <x-ui.table.th>Latest Feed Run</x-ui.table.th>
                 <x-ui.table.th numeric>Products Tracked</x-ui.table.th>
+                <x-ui.table.th numeric>Needs Review</x-ui.table.th>
                 <x-ui.table.th>Actions</x-ui.table.th>
             </x-ui.table.tr>
         </x-ui.table.thead>
@@ -77,6 +78,18 @@
 
                     <x-ui.table.td numeric>{{ number_format($distributor['products_tracked']) }}</x-ui.table.td>
 
+                    <x-ui.table.td numeric>
+                        @if (($distributor['needs_review_count'] ?? 0) > 0)
+                            <a href="{{ route('supply.dashboard', ['review' => 'flagged']) }}"
+                                title="Inspect flagged offerings on the dashboard"
+                                class="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-[1px] text-[10px] font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+                                {{ number_format($distributor['needs_review_count']) }}
+                            </a>
+                        @else
+                            <span class="text-ink-subtle">0</span>
+                        @endif
+                    </x-ui.table.td>
+
                     <x-ui.table.td>
                         <div class="flex flex-wrap items-center gap-1.5">
                             <x-ui.button
@@ -103,7 +116,7 @@
                 </x-ui.table.tr>
             @empty
                 <x-ui.table.tr>
-                    <x-ui.table.td colspan="7">
+                    <x-ui.table.td colspan="8">
                         <div class="py-8 text-center text-[13px] text-ink-subtle">No distributors configured yet.</div>
                     </x-ui.table.td>
                 </x-ui.table.tr>

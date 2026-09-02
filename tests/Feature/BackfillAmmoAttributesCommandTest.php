@@ -94,12 +94,12 @@ class BackfillAmmoAttributesCommandTest extends TestCase
         $this->assertEqualsWithDelta(0.2577, (float) $offering->fresh()->cost_per_round, 0.0002);
     }
 
-    public function test_it_flags_a_centerfire_offering_that_is_still_implausibly_cheap(): void
+    public function test_it_flags_an_offering_whose_price_is_out_of_band(): void
     {
         $distributor = $this->distributor(['slug' => 'rsr']);
         // No packaging cue in the description, and the master round count
         // cannot be corrected automatically, so the CPR stays broken
-        // (10.00 / 1000 = $0.01/round).
+        // (10.00 / 1000 = $0.01/round, below the $0.08 handgun floor).
         $master = $this->master(['caliber' => '9mm Luger', 'rounds_per_box' => 1000]);
         $offering = $this->offering($master, $distributor, [
             'distributor_sku' => 'BULK9',
@@ -108,12 +108,14 @@ class BackfillAmmoAttributesCommandTest extends TestCase
         ]);
 
         $this->artisan('ammo:backfill-attributes')
-            ->expectsOutputToContain('Flagged for review (low $/round)')
-            ->expectsOutputToContain('priced below')
+            ->expectsOutputToContain('Flagged for review (price out of band)')
+            ->expectsOutputToContain('outside the pricing sanity band')
             ->assertExitCode(0);
 
+        $fresh = $offering->fresh();
+        $this->assertTrue($fresh->needs_review);
+        $this->assertStringContainsString('below', (string) $fresh->review_reason);
         $this->assertSame(1000, $master->fresh()->rounds_per_box, 'round count left untouched — no reliable signal');
-        $this->assertEqualsWithDelta(0.01, (float) $offering->fresh()->cost_per_round, 0.0001);
     }
 
     public function test_healthy_centerfire_and_cheap_rimfire_are_not_flagged(): void
@@ -127,9 +129,33 @@ class BackfillAmmoAttributesCommandTest extends TestCase
         $this->offering($rimfire, $distributor, ['raw_description' => 'CCI 22LR 40GR 500RD', 'wholesale_price' => 15.00]);
 
         $this->artisan('ammo:backfill-attributes')
-            ->expectsOutputToContain('Flagged for review (low $/round)')
-            ->doesntExpectOutputToContain('offering priced below')
+            ->expectsOutputToContain('Flagged for review (price out of band)')
+            ->doesntExpectOutputToContain('outside the pricing sanity band')
             ->assertExitCode(0);
+
+        $this->assertSame(0, DistributorProduct::where('needs_review', true)->count());
+    }
+
+    public function test_rerunning_clears_a_stale_review_flag_once_the_data_is_fixed(): void
+    {
+        $distributor = $this->distributor(['slug' => 'rsr']);
+        $master = $this->master(['caliber' => '9mm Luger', 'rounds_per_box' => 50]);
+        // Previously flagged, but the description now parses cleanly.
+        $offering = $this->offering($master, $distributor, [
+            'distributor_sku' => 'MT9A',
+            'raw_description' => 'MAGTECH 9MM LUGER 115GR FMJ 50/1000',
+            'wholesale_price' => 12.88,
+            'needs_review' => true,
+            'review_reason' => 'stale flag from an earlier run',
+        ]);
+
+        $this->artisan('ammo:backfill-attributes')
+            ->expectsOutputToContain('Review flags cleared')
+            ->assertExitCode(0);
+
+        $fresh = $offering->fresh();
+        $this->assertFalse($fresh->needs_review);
+        $this->assertNull($fresh->review_reason);
     }
 
     public function test_distributor_option_scopes_reprocessing_to_one_feed(): void

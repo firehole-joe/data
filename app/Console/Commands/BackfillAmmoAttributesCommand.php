@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\DistributorProduct;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\AmmoAttributeExtractor;
+use App\Services\Feeds\AmmoPricingGuardrail;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
@@ -23,9 +24,9 @@ class BackfillAmmoAttributesCommand extends Command
     /**
      * @var string
      */
-    protected $description = 'Reprocess distributor offerings: re-extract caliber / projectile / grain / round-count, correct box-vs-case round counts, recompute cost-per-round, and flag implausibly cheap centerfire loads.';
+    protected $description = 'Reprocess distributor offerings: re-extract caliber / projectile / grain / round-count, correct box-vs-case round counts, recompute cost-per-round, and run the pricing guardrail (flagging offerings whose $/round falls outside the caliber-tier sanity band for review).';
 
-    public function handle(AmmoAttributeExtractor $extractor): int
+    public function handle(AmmoAttributeExtractor $extractor, AmmoPricingGuardrail $guardrail): int
     {
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
@@ -61,15 +62,16 @@ class BackfillAmmoAttributesCommand extends Command
             'masters_enriched' => 0,
             'master_fields' => 0,
             'flagged' => 0,
+            'cleared' => 0,
         ];
 
         $bar = $this->output->createProgressBar($total);
         $bar->start();
 
         $scope(DistributorProduct::query())
-            ->with('masterAmmunition')
+            ->with(['masterAmmunition', 'distributor'])
             ->orderBy('id')
-            ->chunkById($chunk, function ($products) use ($extractor, $dryRun, $force, &$stats, $bar) {
+            ->chunkById($chunk, function ($products) use ($extractor, $guardrail, $dryRun, $force, &$stats, $bar) {
                 foreach ($products as $product) {
                     $stats['processed']++;
                     $bar->advance();
@@ -100,20 +102,36 @@ class BackfillAmmoAttributesCommand extends Command
                         }
                     }
 
-                    // Integrity check: a centerfire load that still prices
-                    // below ~4 cents/round after reprocessing almost
-                    // certainly has a bad round count — flag it for review.
-                    if ($extractor->cprLooksSuspicious($caliber, $cpr)) {
+                    // Pricing guardrail: hold offerings whose $/round lands
+                    // outside the caliber-tier sanity band (or that have no
+                    // usable round count) out of the market averages until
+                    // a human confirms or corrects them.
+                    $check = $guardrail->validate((float) $product->wholesale_price, $roundCount, $caliber);
+
+                    if (! $check['is_valid']) {
                         $stats['flagged']++;
-                        Log::channel('daily')->warning('ammo.cpr.suspicious', [
+                        if (! $dryRun && (! $product->needs_review || $product->review_reason !== $check['reason'])) {
+                            $product->forceFill([
+                                'needs_review' => true,
+                                'review_reason' => $check['reason'],
+                            ])->save();
+                        }
+                        Log::channel('daily')->warning('ammo.pricing.out_of_band', [
+                            'distributor' => $product->distributor?->slug,
                             'distributor_product_id' => $product->id,
                             'distributor_sku' => $product->distributor_sku,
-                            'caliber' => $caliber,
-                            'dealer_cost' => (float) $product->wholesale_price,
-                            'round_count' => $roundCount,
-                            'cost_per_round' => $cpr,
                             'raw_description' => $product->raw_description,
+                            'caliber' => $caliber,
+                            'parsed_round_count' => $roundCount,
+                            'wholesale_price' => (float) $product->wholesale_price,
+                            'cost_per_round' => $check['cost_per_round'],
+                            'reason' => $check['reason'],
                         ]);
+                    } elseif ($product->needs_review) {
+                        $stats['cleared']++;
+                        if (! $dryRun) {
+                            $product->forceFill(['needs_review' => false, 'review_reason' => null])->save();
+                        }
                     }
 
                     if ($master) {
@@ -136,17 +154,17 @@ class BackfillAmmoAttributesCommand extends Command
                 ['Cost-per-round values written', number_format($stats['cpr_set'])],
                 ['Master records enriched', number_format($stats['masters_enriched'])],
                 ['Master fields filled', number_format($stats['master_fields'])],
-                ['Flagged for review (low $/round)', number_format($stats['flagged'])],
+                ['Flagged for review (price out of band)', number_format($stats['flagged'])],
+                ['Review flags cleared', number_format($stats['cleared'])],
             ],
             'box',
         );
 
         if ($stats['flagged'] > 0) {
             $this->components->warn(sprintf(
-                '%s offering%s priced below $%.2f/round after reprocessing — see the "ammo.cpr.suspicious" log entries.',
+                '%s offering%s outside the pricing sanity band — see the "ammo.pricing.out_of_band" log entries and the needs_review queue.',
                 number_format($stats['flagged']),
                 $stats['flagged'] === 1 ? '' : 's',
-                AmmoAttributeExtractor::SUSPICIOUS_CENTERFIRE_CPR,
             ));
         }
 

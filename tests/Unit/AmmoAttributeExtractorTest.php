@@ -204,32 +204,6 @@ class AmmoAttributeExtractorTest extends TestCase
         $this->assertSame($expected, $this->extractor->costPerRound($price, $count));
     }
 
-    /**
-     * @return array<string, array{0: ?string, 1: ?float, 2: bool}>
-     */
-    public static function suspiciousCprProvider(): array
-    {
-        return [
-            'the reported bug — $12.88 / 1000' => ['9mm Luger', 0.0129, true],
-            'centerfire just under the floor' => ['.223 Remington', 0.039, true],
-            'centerfire at the floor' => ['9mm Luger', 0.04, false],
-            'centerfire healthy' => ['9mm Luger', 0.2576, false],
-            'rimfire can be cheap' => ['.22 LR', 0.03, false],
-            'shotshell can be cheap' => ['12 Gauge', 0.02, false],
-            'unknown caliber is not flagged' => [null, 0.001, false],
-            'null cpr is not flagged' => ['9mm Luger', null, false],
-            'zero cpr is not flagged' => ['9mm Luger', 0.0, false],
-        ];
-    }
-
-    /**
-     * @dataProvider suspiciousCprProvider
-     */
-    public function test_it_flags_implausibly_low_centerfire_cpr(?string $caliber, ?float $cpr, bool $expected): void
-    {
-        $this->assertSame($expected, $this->extractor->cprLooksSuspicious($caliber, $cpr));
-    }
-
     public function test_extract_returns_a_complete_structured_bag_with_cpr(): void
     {
         $bag = $this->extractor->extract('Federal American Eagle .223 Rem 55gr FMJ 20-round box', 17.00);

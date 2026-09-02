@@ -29,6 +29,8 @@ class DistributorProduct extends Model
         'msrp_price',
         'quantity_available',
         'is_in_stock',
+        'needs_review',
+        'review_reason',
         'last_feed_update_at',
     ];
 
@@ -44,6 +46,7 @@ class DistributorProduct extends Model
         'msrp_price' => 'decimal:2',
         'quantity_available' => 'integer',
         'is_in_stock' => 'boolean',
+        'needs_review' => 'boolean',
         'last_feed_update_at' => 'datetime',
     ];
 

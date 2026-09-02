@@ -651,4 +651,70 @@ class SupplyReportFilteringTest extends TestCase
 
         $this->assertNull(session('supply_dashboard_filters'));
     }
+
+    /* ----------------------------------------------------------------- */
+    /* needs_review queue */
+    /* ----------------------------------------------------------------- */
+
+    public function test_flagged_offerings_are_excluded_from_best_price_and_pricing_stats(): void
+    {
+        $d = $this->distributor();
+        $master = $this->master(['name' => 'SHARED', 'caliber' => '9mm Luger', 'rounds_per_box' => 50]);
+
+        // A corrupt, cheap offering that must NOT set the market low.
+        $this->listing($master, $d, [
+            'wholesale_price' => 5.00,
+            'quantity_available' => 40,
+            'needs_review' => true,
+            'review_reason' => '$0.1000/rd below the centerfire_handgun floor',
+        ]);
+        // The one trustworthy offering.
+        $this->listing($master, $d, ['wholesale_price' => 12.00, 'quantity_available' => 60]);
+
+        $rows = $this->service->paginate($this->filters());
+        $row = $rows->first();
+
+        $this->assertSame(12.00, $row->best_price_per_box, 'flagged $5.00 offering must not win best price');
+        $this->assertEqualsWithDelta(0.24, $row->best_price_per_round, 1e-9);
+        $this->assertSame(1, $row->review_count);
+        // Aggregate quantity still counts the flagged row.
+        $this->assertSame(100, $row->total_quantity_available);
+
+        $stats = $this->service->stats($this->filters());
+        $this->assertSame(12.00, $stats['box_price']['min']);
+        $this->assertEqualsWithDelta(0.24, $stats['cpr']['min'], 1e-9);
+        $this->assertSame(1, $stats['needs_review']);
+    }
+
+    public function test_review_filter_narrows_to_flagged_or_clean_offerings(): void
+    {
+        $d = $this->distributor();
+        $flagged = $this->master(['name' => 'FLAGGED ITEM', 'mfr_part_number' => 'F1']);
+        $clean = $this->master(['name' => 'CLEAN ITEM', 'mfr_part_number' => 'C1']);
+
+        $this->listing($flagged, $d, ['wholesale_price' => 4.00, 'needs_review' => true, 'review_reason' => 'x']);
+        $this->listing($clean, $d, ['wholesale_price' => 12.00]);
+
+        $flaggedOnly = $this->service->paginate($this->filters(['review' => 'flagged']));
+        $this->assertEqualsCanonicalizing(['FLAGGED ITEM'], $flaggedOnly->pluck('name')->all());
+
+        $cleanOnly = $this->service->paginate($this->filters(['review' => 'clean']));
+        $this->assertEqualsCanonicalizing(['CLEAN ITEM'], $cleanOnly->pluck('name')->all());
+
+        $all = $this->service->paginate($this->filters(['review' => 'all']));
+        $this->assertEqualsCanonicalizing(['FLAGGED ITEM', 'CLEAN ITEM'], $all->pluck('name')->all());
+    }
+
+    public function test_dashboard_surfaces_the_review_queue_and_filter(): void
+    {
+        $d = $this->distributor(['name' => 'RSR Group', 'slug' => 'rsr']);
+        $master = $this->master(['name' => 'FLAGGED DASHBOARD ITEM', 'caliber' => '9mm Luger']);
+        $this->listing($master, $d, ['wholesale_price' => 3.00, 'needs_review' => true, 'review_reason' => 'price below floor']);
+
+        $this->get(route('supply.dashboard', ['review' => 'flagged']))
+            ->assertOk()
+            ->assertSee('FLAGGED DASHBOARD ITEM')
+            ->assertViewHas('stats', fn ($s) => $s['needs_review'] === 1)
+            ->assertViewHas('filters', fn ($f) => $f['review'] === 'flagged');
+    }
 }

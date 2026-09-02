@@ -36,6 +36,7 @@ class SupplyReportController extends Controller
         'projectile_types',
         'grain_weights',
         'stock_status',
+        'review',
         'min_qty',
         'search',
         'per_page',
@@ -168,7 +169,10 @@ class SupplyReportController extends Controller
     public function distributors()
     {
         $distributors = Distributor::query()
-            ->withCount('distributorProducts')
+            ->withCount([
+                'distributorProducts',
+                'distributorProducts as needs_review_count' => fn ($q) => $q->where('needs_review', true),
+            ])
             ->with('latestFeedRun')
             ->orderBy('name')
             ->get()
@@ -184,6 +188,7 @@ class SupplyReportController extends Controller
                     'latest_status' => $run?->status,
                     'latest_run_at' => $run?->finished_at ?? $run?->started_at ?? $run?->created_at,
                     'products_tracked' => (int) $distributor->distributor_products_count,
+                    'needs_review_count' => (int) $distributor->needs_review_count,
                 ];
             });
 

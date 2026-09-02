@@ -27,12 +27,20 @@ class RsrPackagingParserTest extends TestCase
             'case cue in description' => ['MAGTECH 9MM 115GR FMJ 50/1000 CS', 'MT9A', 1000],
             'case of in description' => ['BLAZER BRASS 9MM 115GR FMJ 50/1000 CASE OF 1000', 'BB9', 1000],
 
-            // Not slash-notation packaging → null (caller keeps its fallback).
-            'no slash' => ['CCI MINI-MAG 22LR 40GR 100RD', 'CCI22', null],
-            'dual caliber cross-ref' => ['MAGPUL 5.56/223 55GR FMJ 20RD', 'MAG556', null],
+            // The dedicated case SKU: no slash, an explicit "1000RD" count.
+            'explicit count on case sku' => ['MAGTECH 9MM 115GR FMJ 1000RD CS', 'MT9A-CSDP', 1000],
+            'explicit BX token' => ['FEDERAL 45 ACP 230GR FMJ 50 BX', 'F45', 50],
+            'explicit PK token' => ['REM 22LR 40GR 500 PK', 'R22', 500],
+
+            // No slash notation → the lone explicit count wins; "5.56/223"
+            // is a caliber cross-ref, not packaging, so "20RD" is used.
+            'explicit count, no slash' => ['CCI MINI-MAG 22LR 40GR 100RD', 'CCI22', 100],
+            'caliber cross-ref falls back to explicit' => ['MAGPUL 5.56/223 55GR FMJ 20RD', 'MAG556', 20],
+
+            // Nothing usable → null (caller keeps its caliber-family fallback).
             'thread pitch' => ['AR BARREL 16IN 1/2X28 THREADED', 'BBL16', null],
-            'case count not round' => ['ODDLOT 9MM 115GR FMJ 50/333', 'ODD9', null],
-            'plain description' => ['FEDERAL HST 9MM 124GR JHP 50-ROUND BOX', 'P9HST3', null],
+            'slash case count not round' => ['ODDLOT 9MM 115GR FMJ 50/333', 'ODD9', null],
+            'hyphenated count is not an explicit token' => ['FEDERAL HST 9MM 124GR JHP 50-ROUND BOX', 'P9HST3', null],
         ];
     }
 

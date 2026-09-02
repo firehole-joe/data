@@ -25,6 +25,10 @@
         $labels = ['in_stock' => 'In stock only', 'out_of_stock' => 'Out of stock'];
         $pills[] = ['name' => 'stock_status', 'value' => 'all', 'label' => $labels[$filters['stock_status']] ?? $filters['stock_status']];
     }
+    if (($filters['review'] ?? 'all') !== 'all') {
+        $labels = ['flagged' => 'Flagged for review', 'clean' => 'Passed review'];
+        $pills[] = ['name' => 'review', 'value' => 'all', 'label' => $labels[$filters['review']] ?? $filters['review']];
+    }
     if ($filters['min_qty'] > 0) {
         $pills[] = ['name' => 'min_qty', 'value' => '', 'label' => 'Qty ≥ '.number_format($filters['min_qty'])];
     }
