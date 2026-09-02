@@ -57,7 +57,7 @@ class ProductMatchingService
             }
         }
 
-        $parsed = $this->parser->parse((string) $product->raw_description);
+        $parsed = $this->parser->parse((string) $product->raw_description, (string) $product->distributor_sku);
 
         $manufacturer = $parsed['manufacturer'];
         $partNumber = $this->cleanString($product->raw_mfr_part_number);

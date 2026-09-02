@@ -2,6 +2,8 @@
 
 namespace App\Services\Ammunition;
 
+use App\Services\Distributors\RsrPackagingParser;
+
 /**
  * Context-aware extraction of the structured ammunition attributes the
  * supply dashboard filters and aggregates on: canonical caliber,
@@ -85,7 +87,8 @@ class AmmoAttributeExtractor
      * Extract the full structured attribute bag for a description.
      *
      * When a wholesale price is supplied the cost-per-round is derived
-     * from it and the resolved round count.
+     * from it and the resolved round count. The distributor SKU, when
+     * known, disambiguates "50/1000" box/case slash notation.
      *
      * @return array{
      *     caliber: ?string,
@@ -96,10 +99,10 @@ class AmmoAttributeExtractor
      *     cost_per_round: ?float
      * }
      */
-    public function extract(string $description, ?float $wholesalePrice = null): array
+    public function extract(string $description, ?float $wholesalePrice = null, string $sku = ''): array
     {
         $caliber = $this->extractCaliber($description);
-        $explicitCount = $this->extractExplicitRoundCount($description);
+        $explicitCount = $this->extractExplicitRoundCount($description, $sku);
         $roundCount = $explicitCount ?? $this->defaultRoundCount($caliber);
 
         return [
@@ -166,9 +169,9 @@ class AmmoAttributeExtractor
      * Resolve a round/box count, falling back to the conventional
      * default for the caliber family when the description has none.
      */
-    public function extractRoundCount(string $text, ?string $caliber = null): int
+    public function extractRoundCount(string $text, ?string $caliber = null, string $sku = ''): int
     {
-        return $this->extractExplicitRoundCount($text) ?? $this->defaultRoundCount($caliber);
+        return $this->extractExplicitRoundCount($text, $sku) ?? $this->defaultRoundCount($caliber);
     }
 
     /**
@@ -190,9 +193,18 @@ class AmmoAttributeExtractor
 
     /**
      * The explicit round count stated in the description, or null.
+     *
+     * "Box/case" slash notation ("50/1000") is resolved first — and to
+     * the box count for a standard listing — so the generic "N round"
+     * match cannot latch onto the trailing case number.
      */
-    private function extractExplicitRoundCount(string $text): ?int
+    private function extractExplicitRoundCount(string $text, string $sku = ''): ?int
     {
+        $slashCount = RsrPackagingParser::extractRoundCount($text, $sku);
+        if ($slashCount !== null) {
+            return $slashCount;
+        }
+
         $haystack = $this->normalize($text);
         $unit = '(?:rd|rds|rnd|rnds|round|rounds|bx|box|pk|pack|count|ct)';
 

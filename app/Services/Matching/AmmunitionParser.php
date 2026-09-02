@@ -2,6 +2,8 @@
 
 namespace App\Services\Matching;
 
+use App\Services\Distributors\RsrPackagingParser;
+
 /**
  * Best-effort extraction of structured ammunition attributes from the
  * free-text descriptions distributors ship in their feeds.
@@ -95,6 +97,9 @@ class AmmunitionParser
     /**
      * Parse a raw description into a structured attribute bag.
      *
+     * The distributor SKU, when known, lets round-count parsing tell a
+     * box listing from a case listing in "50/1000" slash notation.
+     *
      * @return array{
      *     caliber: ?string,
      *     bullet_weight_gr: ?int,
@@ -103,7 +108,7 @@ class AmmunitionParser
      *     manufacturer: ?string
      * }
      */
-    public function parse(string $description): array
+    public function parse(string $description, string $sku = ''): array
     {
         $caliber = $this->parseCaliber($description);
 
@@ -111,7 +116,7 @@ class AmmunitionParser
             'caliber' => $caliber,
             'bullet_weight_gr' => $this->parseBulletWeight($description),
             'bullet_type' => $this->parseBulletType($description),
-            'rounds_per_box' => $this->parseRoundsPerBox($description, $caliber),
+            'rounds_per_box' => $this->parseRoundsPerBox($description, $caliber, $sku),
             'manufacturer' => $this->parseManufacturer($description),
         ];
     }
@@ -162,9 +167,18 @@ class AmmunitionParser
     /**
      * Extract an explicit round/box count, falling back to the
      * conventional default for the caliber family.
+     *
+     * "Box/case" slash notation ("50/1000") is resolved first, and to the
+     * box count for a standard listing, so a plain "N round" match can
+     * never latch onto the trailing case number.
      */
-    public function parseRoundsPerBox(string $text, ?string $caliber = null): int
+    public function parseRoundsPerBox(string $text, ?string $caliber = null, string $sku = ''): int
     {
+        $slashCount = RsrPackagingParser::extractRoundCount($text, $sku);
+        if ($slashCount !== null) {
+            return $slashCount;
+        }
+
         $haystack = $this->normalize($text);
 
         $unit = '(?:rd|rds|rnd|rnds|round|rounds|bx|box|pk|pack|count|ct)';

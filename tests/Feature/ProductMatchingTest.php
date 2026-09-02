@@ -157,6 +157,46 @@ class ProductMatchingTest extends TestCase
         $this->assertSame(1, $this->matcher->getStats()['created']);
     }
 
+    public function test_tier_3_uses_the_box_count_for_slash_packaging_notation(): void
+    {
+        // Reported bug: "50/1000" on a plain box SKU was grabbing the case
+        // count (1000), turning a $12.88 box of 50 into $0.013/round.
+        $product = $this->product([
+            'raw_upc' => null,
+            'raw_mfr_part_number' => 'MT9A',
+            'distributor_sku' => 'MT9A',
+            'raw_description' => 'MAGTECH 9MM LUGER 115GR FMJ 50/1000',
+            'wholesale_price' => 12.88,
+        ]);
+
+        $master = $this->matcher->matchProduct($product);
+
+        $this->assertNotNull($master);
+        $this->assertTrue($master->wasRecentlyCreated);
+        $this->assertSame(50, $master->rounds_per_box);
+        $this->assertEqualsWithDelta(
+            0.258,
+            round((float) $product->fresh()->wholesale_price / $master->rounds_per_box, 3),
+            0.001,
+        );
+    }
+
+    public function test_tier_3_uses_the_case_count_when_the_sku_flags_a_case(): void
+    {
+        $product = $this->product([
+            'raw_upc' => null,
+            'raw_mfr_part_number' => 'MT9A-CS',
+            'distributor_sku' => 'MT9A-CS',
+            'raw_description' => 'MAGTECH 9MM LUGER 115GR FMJ 50/1000',
+            'wholesale_price' => 257.60,
+        ]);
+
+        $master = $this->matcher->matchProduct($product);
+
+        $this->assertNotNull($master);
+        $this->assertSame(1000, $master->rounds_per_box);
+    }
+
     public function test_tier_3_is_skipped_when_auto_create_is_disabled(): void
     {
         $product = $this->product([

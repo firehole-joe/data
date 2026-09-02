@@ -162,6 +162,10 @@ class AmmunitionParserTest extends TestCase
             'handgun default' => ['Speer 9mm 124gr', '9mm Luger', 50],
             'shotgun default' => ['Federal 12 Gauge 00 Buck', '12 Gauge', 25],
             'unknown default' => ['mystery ammo', null, 50],
+            // Box/case slash notation resolves to the box count, never the
+            // case count, even when a trailing "RD" follows the case number.
+            'slash notation box' => ['MAGTECH 9MM 115GR FMJ 50/1000', '9mm Luger', 50],
+            'slash notation box with unit' => ['PMC 223 55GR FMJ 20/1000RD', '.223 Remington', 20],
         ];
     }
 
@@ -171,6 +175,17 @@ class AmmunitionParserTest extends TestCase
     public function test_it_extracts_or_defaults_rounds_per_box(string $raw, ?string $caliber, int $expected): void
     {
         $this->assertSame($expected, $this->parser->parseRoundsPerBox($raw, $caliber));
+    }
+
+    public function test_slash_notation_honours_the_sku_case_marker(): void
+    {
+        $description = 'MAGTECH 9MM 115GR FMJ 50/1000';
+
+        $this->assertSame(50, $this->parser->parseRoundsPerBox($description, '9mm Luger', 'MT9A'));
+        $this->assertSame(1000, $this->parser->parseRoundsPerBox($description, '9mm Luger', 'MT9A-CS'));
+
+        $parsed = $this->parser->parse($description, 'MT9A');
+        $this->assertSame(50, $parsed['rounds_per_box']);
     }
 
     /**

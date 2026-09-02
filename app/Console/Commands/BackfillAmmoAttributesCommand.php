@@ -64,12 +64,18 @@ class BackfillAmmoAttributesCommand extends Command
                     $attributes = $extractor->extract(
                         (string) $product->raw_description,
                         (float) $product->wholesale_price,
+                        (string) $product->distributor_sku,
                     );
 
                     $master = $product->masterAmmunition;
-                    $roundCount = ($master && (int) $master->rounds_per_box > 0)
-                        ? (int) $master->rounds_per_box
-                        : $attributes['round_count'];
+                    // An explicit packaging count from the description / SKU
+                    // (e.g. "50/1000" box/case slash notation) is the most
+                    // reliable signal and overrides a possibly stale master.
+                    $roundCount = $attributes['round_count_explicit']
+                        ? $attributes['round_count']
+                        : (($master && (int) $master->rounds_per_box > 0)
+                            ? (int) $master->rounds_per_box
+                            : $attributes['round_count']);
 
                     $cpr = $extractor->costPerRound((float) $product->wholesale_price, $roundCount);
 
@@ -133,7 +139,10 @@ class BackfillAmmoAttributesCommand extends Command
             $updates['bullet_weight_gr'] = $attributes['grain_weight'];
         }
 
-        if ($attributes['round_count_explicit'] && ($force || (int) $master->rounds_per_box === 50)) {
+        // An explicit description/SKU packaging count always wins — this is
+        // what corrects masters that were stored with a case count (1000)
+        // instead of the box count (50) before slash notation was handled.
+        if ($attributes['round_count_explicit'] && ($force || (int) $master->rounds_per_box !== (int) $attributes['round_count'])) {
             $updates['rounds_per_box'] = $attributes['round_count'];
         }
 

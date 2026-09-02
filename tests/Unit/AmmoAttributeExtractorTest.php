@@ -150,6 +150,9 @@ class AmmoAttributeExtractorTest extends TestCase
             'handgun default' => ['Speer 9mm 124gr', '9mm Luger', 50],
             'shotgun default' => ['Federal 12 Gauge 00 Buck', '12 Gauge', 25],
             'unknown default' => ['mystery ammo', null, 50],
+            // Box/case slash notation must resolve to the box count.
+            'slash notation box' => ['MAGTECH 9MM 115GR FMJ 50/1000', '9mm Luger', 50],
+            'slash notation box with unit' => ['PMC 223 55GR FMJ 20/1000RD', '.223 Remington', 20],
         ];
     }
 
@@ -159,6 +162,23 @@ class AmmoAttributeExtractorTest extends TestCase
     public function test_it_extracts_or_defaults_round_count(string $raw, ?string $caliber, int $expected): void
     {
         $this->assertSame($expected, $this->extractor->extractRoundCount($raw, $caliber));
+    }
+
+    public function test_slash_notation_round_count_flows_through_extract_and_cpr(): void
+    {
+        $bag = $this->extractor->extract('MAGTECH 9MM 115GR FMJ 50/1000', 12.88, 'MT9A');
+
+        $this->assertSame(50, $bag['round_count']);
+        $this->assertTrue($bag['round_count_explicit']);
+        $this->assertEqualsWithDelta(0.2576, $bag['cost_per_round'], 0.0001);
+    }
+
+    public function test_slash_notation_case_sku_resolves_to_the_case_count(): void
+    {
+        $bag = $this->extractor->extract('MAGTECH 9MM 115GR FMJ 50/1000', 257.60, 'MT9A-CS');
+
+        $this->assertSame(1000, $bag['round_count']);
+        $this->assertEqualsWithDelta(0.2576, $bag['cost_per_round'], 0.0001);
     }
 
     /**
