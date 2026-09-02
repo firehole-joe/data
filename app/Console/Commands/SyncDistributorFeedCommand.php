@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Distributor;
+use App\Models\DistributorProduct;
 use App\Services\Feeds\FeedIngestionService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -16,6 +17,7 @@ class SyncDistributorFeedCommand extends Command
     protected $signature = 'feed:sync
         {slug? : The slug of the distributor to sync}
         {--all : Sync all active distributors}
+        {--force : With --all, include distributors marked inactive}
         {--dry-run : Parse feed without persisting to database}';
 
     /**
@@ -73,11 +75,16 @@ class SyncDistributorFeedCommand extends Command
                 }
             }
 
+            $tally = $this->offeringTally($distributor);
+
             $rows[] = [
                 $distributor->name,
                 $distributor->slug,
                 number_format((int) ($run?->rows_processed ?? 0)),
                 number_format((int) ($run?->rows_updated ?? 0)),
+                number_format($tally['matched']),
+                number_format($tally['flagged']),
+                number_format($tally['ignored']),
                 number_format((int) ($run?->rows_failed ?? 0)),
                 $this->formatDuration($elapsed),
                 $this->statusLabel($status),
@@ -86,7 +93,7 @@ class SyncDistributorFeedCommand extends Command
 
         $this->newLine();
         $this->table(
-            ['Distributor', 'Slug', 'Processed', 'Updated', 'Failed', 'Duration', 'Status'],
+            ['Distributor', 'Slug', 'Processed', 'Updated', 'Matched', 'Flagged', 'Ignored', 'Failed', 'Duration', 'Status'],
             $rows,
             'box',
         );
@@ -109,7 +116,7 @@ class SyncDistributorFeedCommand extends Command
     {
         if ($this->option('all')) {
             return Distributor::query()
-                ->where('is_active', true)
+                ->when(! $this->option('force'), fn ($q) => $q->where('is_active', true))
                 ->orderBy('name')
                 ->get();
         }
@@ -123,6 +130,23 @@ class SyncDistributorFeedCommand extends Command
         }
 
         return Distributor::query()->where('slug', $slug)->get();
+    }
+
+    /**
+     * Post-sync offering counts for a distributor: how many of its
+     * listings are mapped to a master, held for review, or dismissed.
+     *
+     * @return array{matched: int, flagged: int, ignored: int}
+     */
+    private function offeringTally(Distributor $distributor): array
+    {
+        $base = DistributorProduct::query()->where('distributor_id', $distributor->id);
+
+        return [
+            'matched' => (clone $base)->whereNotNull('master_ammunition_id')->count(),
+            'flagged' => (clone $base)->where('needs_review', true)->count(),
+            'ignored' => (clone $base)->where('is_ignored', true)->count(),
+        ];
     }
 
     private function formatDuration(float $seconds): string

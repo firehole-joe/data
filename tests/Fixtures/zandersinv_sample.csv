@@ -1,0 +1,9 @@
+Avail,Category,Desc1,Desc2,Item#,MFG,MFGPNum,MSRP,Price1,Price2,Price3,Qty1,Qty2,Qty3,UPC,Weight,Serialized
+300,Ammunition - Handgun,CCI Blazer Brass 9mm Luger,115gr FMJ 50rd,ZAN-CCI9MM,CCI,5200,21.99,9.10,9.35,9.60,300,0,0,0 76683-03528 8,1.9,N
+410,Ammunition - Rifle,Federal American Eagle 5.56,XM855 62gr Green Tip 20rd,ZAN-FED556,Federal,XM855,10.99,7.95,8.10,8.25,410,0,0,604544628567,0.8,N
+60,Ammunition - Rimfire,CCI Mini-Mag 22LR 40gr,CPRN 50rd,ZAN-CCI22,CCI,0030,7.99,45.00,46.00,47.00,60,0,0,076683000361,0.5,N
+0,Ammunition - Handgun,PMC Bronze 45 ACP,230gr FMJ 50rd,ZAN-PMC45,PMC,45A,24.99,17.50,17.75,18.00,0,0,0,741569070256,2.1,N
+120,Ammunition - Handgun,Reclaimed 9mm Range Brass,Loaded 50rd,ZAN-RECLAIM9,Mixed,RECLAIM9,12.00,3.00,3.10,3.20,120,0,0,111111111119,2.0,N
+80,Ammunition - Rifle,Magtech 308 Win M80,147gr FMJ 50/1000,ZAN-MT308,Magtech,308A,899.00,540.00,545.00,550.00,80,0,0,754908162307,30.0,N
+15,Handguns,Glock 19 Gen5 9mm Luger,15rd 3 mags,ZAN-GLK19,Glock,PA195S203,599.00,449.00,455.00,460.00,15,0,0,764503022630,1.5,Y
+22,Optics - Riflescopes,Leupold VX-3HD 3.5-10x40,CDS-ZL riflescope,ZAN-LEUP,Leupold,171229,499.00,399.00,405.00,410.00,22,0,0,030317013035,1.1,N

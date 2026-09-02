@@ -27,9 +27,33 @@ class DistributorSeeder extends Seeder
         foreach ($this->distributors() as $distributor) {
             Distributor::updateOrCreate(
                 ['slug' => $distributor['slug']],
-                $distributor + ['connection_settings' => $this->connectionScaffold($distributor['transport_type'])],
+                $distributor + ['connection_settings' => $this->connectionSettingsFor($distributor)],
             );
         }
+    }
+
+    /**
+     * Connection settings for a distributor: a per-distributor block from
+     * config/distributors.php when one exists, otherwise an empty
+     * credential scaffold shaped for the transport type.
+     *
+     * @param  array{slug: string, transport_type: string}  $distributor
+     * @return array<string, mixed>
+     */
+    private function connectionSettingsFor(array $distributor): array
+    {
+        $configured = (array) config("distributors.{$distributor['slug']}", []);
+
+        if ($configured === []) {
+            return $this->connectionScaffold($distributor['transport_type']);
+        }
+
+        return array_merge(
+            $this->connectionScaffold($distributor['transport_type']),
+            array_intersect_key($configured, array_flip([
+                'host', 'port', 'username', 'password', 'passive', 'ssl', 'remote_path',
+            ])),
+        );
     }
 
     /**
@@ -53,7 +77,7 @@ class DistributorSeeder extends Seeder
             [
                 'name' => 'Zanders Sporting Goods',
                 'slug' => 'zanders',
-                'transport_type' => 'http_csv',
+                'transport_type' => 'ftp',
                 'driver_class' => ZandersFeedDriver::class,
             ],
             [
