@@ -6,6 +6,8 @@ use App\Models\DistributorProduct;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\AmmoAttributeExtractor;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 class BackfillAmmoAttributesCommand extends Command
 {
@@ -15,31 +17,41 @@ class BackfillAmmoAttributesCommand extends Command
     protected $signature = 'ammo:backfill-attributes
         {--dry-run : Report what would change without writing}
         {--force : Overwrite master attributes that are already populated}
+        {--distributor= : Limit reprocessing to one distributor slug (e.g. rsr)}
         {--chunk=500 : Rows processed per batch}';
 
     /**
      * @var string
      */
-    protected $description = 'Extract caliber / projectile / grain / round-count from raw descriptions and backfill the derived cost-per-round.';
+    protected $description = 'Reprocess distributor offerings: re-extract caliber / projectile / grain / round-count, correct box-vs-case round counts, recompute cost-per-round, and flag implausibly cheap centerfire loads.';
 
     public function handle(AmmoAttributeExtractor $extractor): int
     {
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
         $chunk = max(1, (int) $this->option('chunk'));
+        $slug = ($raw = trim((string) $this->option('distributor'))) !== '' ? $raw : null;
 
-        $total = DistributorProduct::query()->count();
+        $scope = fn (Builder $q): Builder => $q->when(
+            $slug !== null,
+            fn (Builder $inner) => $inner->whereHas('distributor', fn ($d) => $d->where('slug', $slug)),
+        );
+
+        $total = $scope(DistributorProduct::query())->count();
 
         if ($total === 0) {
-            $this->components->info('No distributor products to process.');
+            $this->components->info($slug !== null
+                ? "No distributor products to process for [{$slug}]."
+                : 'No distributor products to process.');
 
             return self::SUCCESS;
         }
 
         $this->components->info(sprintf(
-            'Backfilling attributes for %s distributor product%s%s.',
+            'Reprocessing %s distributor product%s%s%s.',
             number_format($total),
             $total === 1 ? '' : 's',
+            $slug !== null ? " for [{$slug}]" : '',
             $dryRun ? ' (dry run — nothing will be written)' : '',
         ));
 
@@ -48,12 +60,13 @@ class BackfillAmmoAttributesCommand extends Command
             'cpr_set' => 0,
             'masters_enriched' => 0,
             'master_fields' => 0,
+            'flagged' => 0,
         ];
 
         $bar = $this->output->createProgressBar($total);
         $bar->start();
 
-        DistributorProduct::query()
+        $scope(DistributorProduct::query())
             ->with('masterAmmunition')
             ->orderBy('id')
             ->chunkById($chunk, function ($products) use ($extractor, $dryRun, $force, &$stats, $bar) {
@@ -78,12 +91,29 @@ class BackfillAmmoAttributesCommand extends Command
                             : $attributes['round_count']);
 
                     $cpr = $extractor->costPerRound((float) $product->wholesale_price, $roundCount);
+                    $caliber = $master?->caliber ?? $attributes['caliber'];
 
                     if ($cpr !== null && $this->differs($product->cost_per_round, $cpr)) {
                         $stats['cpr_set']++;
                         if (! $dryRun) {
                             $product->forceFill(['cost_per_round' => $cpr])->save();
                         }
+                    }
+
+                    // Integrity check: a centerfire load that still prices
+                    // below ~4 cents/round after reprocessing almost
+                    // certainly has a bad round count — flag it for review.
+                    if ($extractor->cprLooksSuspicious($caliber, $cpr)) {
+                        $stats['flagged']++;
+                        Log::channel('daily')->warning('ammo.cpr.suspicious', [
+                            'distributor_product_id' => $product->id,
+                            'distributor_sku' => $product->distributor_sku,
+                            'caliber' => $caliber,
+                            'dealer_cost' => (float) $product->wholesale_price,
+                            'round_count' => $roundCount,
+                            'cost_per_round' => $cpr,
+                            'raw_description' => $product->raw_description,
+                        ]);
                     }
 
                     if ($master) {
@@ -106,9 +136,19 @@ class BackfillAmmoAttributesCommand extends Command
                 ['Cost-per-round values written', number_format($stats['cpr_set'])],
                 ['Master records enriched', number_format($stats['masters_enriched'])],
                 ['Master fields filled', number_format($stats['master_fields'])],
+                ['Flagged for review (low $/round)', number_format($stats['flagged'])],
             ],
             'box',
         );
+
+        if ($stats['flagged'] > 0) {
+            $this->components->warn(sprintf(
+                '%s offering%s priced below $%.2f/round after reprocessing — see the "ammo.cpr.suspicious" log entries.',
+                number_format($stats['flagged']),
+                $stats['flagged'] === 1 ? '' : 's',
+                AmmoAttributeExtractor::SUSPICIOUS_CENTERFIRE_CPR,
+            ));
+        }
 
         if ($dryRun) {
             $this->components->warn('Dry run: no changes were persisted.');

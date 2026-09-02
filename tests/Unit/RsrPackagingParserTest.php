@@ -21,6 +21,7 @@ class RsrPackagingParserTest extends TestCase
 
             // Case listings resolve to the case (second) count.
             'case marker -CS in sku' => ['MAGTECH 9MM 115GR FMJ 50/1000', 'MT9A-CS', 1000],
+            'case marker -CSDP in sku' => ['MAGTECH 9MM 115GR FMJ 50/1000', 'MT9A-CSDP', 1000],
             'case marker CSDP in sku' => ['MAGTECH 9MM 115GR FMJ 50/1000', 'MT9ACSDP', 1000],
             'case marker sku ends CS' => ['MAGTECH 9MM 115GR FMJ 50/1000', 'MT9ACS', 1000],
             'case cue in description' => ['MAGTECH 9MM 115GR FMJ 50/1000 CS', 'MT9A', 1000],

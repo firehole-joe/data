@@ -64,6 +64,24 @@ class AmmoAttributeExtractor
     ];
 
     /**
+     * Below this wholesale $/round a standard centerfire load is almost
+     * certainly mis-counted — the classic tell of a case count used
+     * where the box count belonged (e.g. $12.88 / 1000 = $0.013 instead
+     * of $12.88 / 50 = $0.258).
+     */
+    public const SUSPICIOUS_CENTERFIRE_CPR = 0.04;
+
+    /**
+     * Canonical calibers that are NOT centerfire — rimfire and shotshell
+     * can legitimately price well under 4 cents a round in bulk, so the
+     * low-CPR sanity check does not apply to them.
+     */
+    private const NON_CENTERFIRE_CALIBERS = [
+        '.22 LR',
+        '12 Gauge',
+    ];
+
+    /**
      * Canonical projectile type => detection pattern, evaluated in order
      * (the compound acronyms before their substrings: JHP before HP,
      * TMJ/FMJ before the tip types, "solid copper" before a bare SP).
@@ -189,6 +207,25 @@ class AmmoAttributeExtractor
         }
 
         return round($wholesalePrice / $roundCount, 4);
+    }
+
+    /**
+     * Whether a computed cost-per-round is implausibly low for standard
+     * centerfire ammunition, i.e. a likely bad round count that should be
+     * logged / flagged for review. Rimfire, shotshell, an unknown
+     * caliber and a null/zero CPR are all treated as "not suspicious".
+     */
+    public function cprLooksSuspicious(?string $caliber, ?float $costPerRound): bool
+    {
+        if ($costPerRound === null || $costPerRound <= 0.0) {
+            return false;
+        }
+
+        if ($caliber === null || in_array($caliber, self::NON_CENTERFIRE_CALIBERS, true)) {
+            return false;
+        }
+
+        return $costPerRound < self::SUSPICIOUS_CENTERFIRE_CPR;
     }
 
     /**

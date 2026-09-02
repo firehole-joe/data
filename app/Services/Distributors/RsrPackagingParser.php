@@ -22,7 +22,7 @@ class RsrPackagingParser
      *
      * @var array<int, string>
      */
-    private const CASE_SKU_MARKERS = ['-CS', 'CSDP', '-CASE'];
+    private const CASE_SKU_MARKERS = ['-CS', '-CSDP', 'CSDP', '-CASE'];
 
     /**
      * The round count implied by "box/case" slash notation (e.g.
