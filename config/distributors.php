@@ -30,4 +30,16 @@ return [
         'ssl' => false,
     ],
 
+    'chattanooga' => [
+        'transport' => 'rest_api',
+        // REST v6 base. `GET {base_uri}/items/product-feed` returns a JSON
+        // envelope whose `product_feed.url` points at a freshly generated
+        // itemInventory CSV export that the driver then stream-downloads.
+        'base_uri' => env('CHATTANOOGA_API_URL', 'https://api.chattanoogashooting.com/rest/v6/'),
+        // Basic auth is base64(SID . ':' . md5(TOKEN)); both halves come
+        // from the environment and have no committed fallback.
+        'sid' => env('CHATTANOOGA_SID'),
+        'token' => env('CHATTANOOGA_TOKEN'),
+    ],
+
 ];

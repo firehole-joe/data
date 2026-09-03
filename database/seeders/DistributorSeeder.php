@@ -52,6 +52,7 @@ class DistributorSeeder extends Seeder
             $this->connectionScaffold($distributor['transport_type']),
             array_intersect_key($configured, array_flip([
                 'host', 'port', 'username', 'password', 'passive', 'ssl', 'remote_path',
+                'base_uri', 'sid', 'token', 'api_key', 'api_secret',
             ])),
         );
     }
@@ -71,7 +72,7 @@ class DistributorSeeder extends Seeder
             [
                 'name' => 'Chattanooga Shooting Supplies',
                 'slug' => 'chattanooga',
-                'transport_type' => 'ftp',
+                'transport_type' => 'rest_api',
                 'driver_class' => ChattanoogaFeedDriver::class,
             ],
             [
@@ -143,6 +144,10 @@ class DistributorSeeder extends Seeder
                 'base_uri' => null,
                 'api_key' => null,
                 'api_secret' => null,
+                // Chattanooga's REST auth pair; harmless for the other
+                // rest_api distributors, which simply leave them null.
+                'sid' => null,
+                'token' => null,
             ],
             'http_csv' => [
                 'url' => null,

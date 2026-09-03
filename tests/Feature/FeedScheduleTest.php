@@ -52,11 +52,23 @@ class FeedScheduleTest extends TestCase
         $this->assertTrue($event->shouldAppendOutput);
     }
 
+    public function test_chattanooga_feed_sync_is_scheduled_daily_at_0500(): void
+    {
+        $event = $this->eventFor('feed:sync chattanooga --force');
+
+        $this->assertSame('0 5 * * *', $event->expression);
+        $this->assertTrue($event->runInBackground);
+        $this->assertTrue($event->withoutOverlapping);
+        $this->assertSame(60, $event->expiresAt);
+        $this->assertSame(storage_path('logs/feed-chattanooga.log'), $event->output);
+        $this->assertTrue($event->shouldAppendOutput);
+    }
+
     public function test_scheduled_feed_syncs_do_not_share_a_mutex(): void
     {
-        $rsr = $this->eventFor('feed:sync rsr --force');
-        $zanders = $this->eventFor('feed:sync zanders --force');
+        $mutexes = collect(['rsr', 'zanders', 'chattanooga'])
+            ->map(fn (string $slug) => $this->eventFor("feed:sync {$slug} --force")->mutexName());
 
-        $this->assertNotSame($rsr->mutexName(), $zanders->mutexName());
+        $this->assertCount(3, $mutexes->unique(), 'each scheduled feed has its own overlap mutex');
     }
 }
