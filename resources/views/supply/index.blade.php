@@ -11,7 +11,9 @@
                 Live wholesale pricing &amp; availability across {{ $distributorCount }} distributor feed{{ $distributorCount === 1 ? '' : 's' }}.
             </p>
         </div>
-        <x-ui.button :href="route('supply.distributors')" variant="outline" size="sm">Feed health &rarr;</x-ui.button>
+        @if (auth()->user()?->isAdmin())
+            <x-ui.button :href="route('supply.distributors')" variant="outline" size="sm">Feed health &rarr;</x-ui.button>
+        @endif
     </div>
 
     {{-- KPI row --}}

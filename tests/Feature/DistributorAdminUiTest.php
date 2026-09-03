@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Distributor;
 use App\Models\FeedRun;
+use App\Models\User;
 use App\Services\Feeds\Contracts\FeedDriverInterface;
 use App\Services\Feeds\Drivers\RsrFeedDriver;
 use App\Services\Feeds\FeedIngestionService;
@@ -310,7 +311,8 @@ class DistributorAdminUiTest extends TestCase
     {
         $this->distributor(['name' => 'RSR Group', 'slug' => 'rsr']);
 
-        $this->get(route('supply.distributors'))
+        $this->actingAs(User::factory()->admin()->create())
+            ->get(route('supply.distributors'))
             ->assertOk()
             ->assertSee('Edit Credentials')
             ->assertSee('Test Connection')

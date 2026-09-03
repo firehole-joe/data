@@ -8,7 +8,8 @@ class AdminAuthController extends Controller
 {
     public function showUnlockForm(Request $request)
     {
-        if ($request->session()->get('feed_admin_authenticated') === true) {
+        // A signed-in admin never needs the passphrase.
+        if ($request->user()?->isAdmin() || $request->session()->get('feed_admin_authenticated') === true) {
             return redirect()->route('supply.distributors');
         }
 

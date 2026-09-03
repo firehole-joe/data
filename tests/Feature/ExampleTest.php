@@ -10,12 +10,13 @@ class ExampleTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * The supply report is served at the application root.
+     * The branded landing page is served at the application root.
      */
     public function test_the_application_returns_a_successful_response(): void
     {
         $response = $this->get('/');
 
         $response->assertStatus(200);
+        $response->assertSee('Firehole Industry Data Operations');
     }
 }

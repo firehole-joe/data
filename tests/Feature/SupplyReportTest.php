@@ -6,6 +6,7 @@ use App\Models\Distributor;
 use App\Models\DistributorProduct;
 use App\Models\FeedRun;
 use App\Models\MasterAmmunition;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -265,7 +266,10 @@ class SupplyReportTest extends TestCase
             'error_message' => 'boom',
         ]);
 
-        $response = $this->get(route('supply.distributors'))->assertOk();
+        // The Distributors & Feed Health console is limited to admins.
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('supply.distributors'))
+            ->assertOk();
         $response->assertSeeInOrder(['RSR Group', 'sftp', 'failed']);
         $response->assertSee('Zzz Wholesale');
         $response->assertSee('Products Tracked');

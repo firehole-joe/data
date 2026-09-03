@@ -164,7 +164,8 @@ class SupplyReportController extends Controller
             'facets' => $query->facets($filters),
             'filters' => $filters,
             'perPageOptions' => SupplyReportQueryService::PER_PAGE_OPTIONS,
-            'canResolve' => $request->session()->get('feed_admin_authenticated') === true,
+            'canResolve' => $request->user()?->isAdmin() === true
+                || $request->session()->get('feed_admin_authenticated') === true,
         ]);
     }
 

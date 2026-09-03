@@ -7,13 +7,20 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Gates the distributor credential management UI behind a shared
- * passphrase held in the session.
+ * Gates feed-admin actions (credential edits, manual syncs, flagged-
+ * offering resolution) behind a shared passphrase held in the session.
+ *
+ * A signed-in feed administrator ({@see \App\Models\User::isAdmin()})
+ * skips the gate entirely and is never prompted for the passphrase.
  */
 class FeedAdminPassphraseMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
+        if ($request->user()?->isAdmin() === true) {
+            return $next($request);
+        }
+
         if ($request->session()->get('feed_admin_authenticated') === true) {
             return $next($request);
         }

@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
     <title>@yield('title', 'Ammunition Supply Report') &middot; data.firehole.com</title>
 
     {{-- Apply persisted theme + accent before first paint (no flash). --}}
@@ -109,8 +110,10 @@
                 $nav = [
                     ['label' => 'Live Supply Report', 'route' => 'supply.index'],
                     ['label' => 'Supply Dashboard', 'route' => 'supply.dashboard'],
-                    ['label' => 'Distributors & Feed Health', 'route' => 'supply.distributors'],
                 ];
+                if (auth()->user()?->isAdmin()) {
+                    $nav[] = ['label' => 'Distributors & Feed Health', 'route' => 'supply.distributors'];
+                }
             @endphp
             <nav class="hidden items-center gap-1 sm:flex" aria-label="Primary">
                 @foreach ($nav as $item)
@@ -145,6 +148,18 @@
                     <svg class="h-4 w-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                     <svg class="hidden h-4 w-4 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
                 </button>
+
+                @auth
+                    <form method="POST" action="{{ route('logout') }}" class="ml-1">
+                        @csrf
+                        <button type="submit"
+                            class="rounded-lg border border-line px-2.5 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink"
+                            title="Signed in as {{ auth()->user()->email }}">Sign out</button>
+                    </form>
+                @else
+                    <a href="{{ route('login') }}"
+                        class="ml-1 rounded-lg border border-line px-2.5 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">Sign in</a>
+                @endauth
             </div>
         </div>
     </header>
