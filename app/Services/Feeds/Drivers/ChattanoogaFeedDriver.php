@@ -6,6 +6,7 @@ use App\Models\Distributor;
 use App\Services\Ammunition\AmmoAttributeExtractor;
 use App\Services\Feeds\DTOs\FeedItemDTO;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -75,13 +76,23 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
     }
 
     /**
-     * Two-legged retrieval: resolve the generated export URL, then
-     * stream it to a local temp file.
+     * Two-legged retrieval:
+     *
+     *  1. `GET /items/product-feed` (JSON) mints an export and returns
+     *     its URL. Chattanooga throttles this endpoint to roughly one
+     *     call per 20 minutes; a 429 / `too-many-requests` is surfaced
+     *     as a clear, actionable failure.
+     *  2. `GET {csvUrl}` streams the export to a temp file. This is a
+     *     `.csv` endpoint that answers `406 Not Acceptable` to an
+     *     `application/json` Accept header, so this leg sends a wildcard
+     *     Accept (never the shared JSON {@see client()}), follows
+     *     redirects and uses a generous timeout.
      */
     public function downloadFeed(Distributor $distributor): string
     {
         $settings = (array) ($distributor->connection_settings ?? []);
-        $feedUrl = $this->resolveProductFeedUrl($settings);
+
+        $csvUrl = $this->resolveProductFeedUrl($settings);
 
         $localPath = tempnam(sys_get_temp_dir(), $this->feedSlug().'_feed_');
         if ($localPath === false) {
@@ -89,10 +100,20 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
         }
 
         try {
-            $this->client($settings)
-                ->withOptions(['sink' => $localPath])
-                ->get($feedUrl)
-                ->throw();
+            $downloadResponse = Http::withHeaders([
+                'Accept' => '*/*',
+                'Authorization' => $this->authorizationHeader($settings),
+            ])->withOptions([
+                'sink' => $localPath,
+                'timeout' => (int) ($settings['download_timeout'] ?? 300),
+                'allow_redirects' => true,
+            ])->get($csvUrl);
+
+            if (! $downloadResponse->successful()) {
+                throw new RuntimeException(
+                    'Failed to download Chattanooga CSV: HTTP '.$downloadResponse->status(),
+                );
+            }
         } catch (\Throwable $e) {
             @unlink($localPath);
             throw $e;
@@ -126,12 +147,14 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
      */
     private function resolveProductFeedUrl(array $settings): string
     {
-        $payload = $this->client($settings)
-            ->get($this->endpoint($settings, self::PRODUCT_FEED_ENDPOINT))
-            ->throw()
-            ->json();
+        $response = $this->client($settings)
+            ->get($this->endpoint($settings, self::PRODUCT_FEED_ENDPOINT));
 
-        $url = data_get($payload, 'product_feed.url');
+        $this->guardAgainstRateLimit($response);
+
+        $response->throw();
+
+        $url = data_get($response->json(), 'product_feed.url');
 
         if (! is_string($url) || trim($url) === '') {
             throw new RuntimeException('Chattanooga product-feed response did not carry a download URL.');
@@ -141,7 +164,55 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
     }
 
     /**
-     * A pending request carrying Chattanooga's authorization header.
+     * Chattanooga throttles the export-generation endpoint hard (~one
+     * call per 20 minutes). Turn a 429 — or a body carrying a
+     * `too-many-requests` / rate-limit marker — into a clear, actionable
+     * message instead of a generic HTTP exception.
+     */
+    private function guardAgainstRateLimit(Response $response): void
+    {
+        $haystack = strtolower(implode(' ', [
+            $response->body(),
+            (string) data_get($response->json(), 'error', ''),
+            (string) data_get($response->json(), 'message', ''),
+        ]));
+
+        $rateLimited = $response->status() === 429
+            || str_contains($haystack, 'too-many-requests')
+            || str_contains($haystack, 'too many requests')
+            || str_contains($haystack, 'rate limit')
+            || str_contains($haystack, 'rate-limit');
+
+        if ($rateLimited) {
+            throw new RuntimeException(
+                'Chattanooga feed export rate-limited: please wait before retrying '
+                .'(the product-feed generation endpoint allows roughly one request every 20 minutes).',
+            );
+        }
+    }
+
+    /**
+     * A JSON pending request carrying Chattanooga's authorization header.
+     * Used only for the `/items/product-feed` generation leg; the CSV
+     * download builds its own request with a wildcard Accept header.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    private function client(array $settings): PendingRequest
+    {
+        // Deliberately no ->retry(): the generation endpoint is throttled
+        // to ~one call per 20 minutes, so an automatic retry on a 429
+        // just deepens the cooldown. A 429/5xx comes back as a Response
+        // for guardAgainstRateLimit() to translate.
+        return Http::timeout((int) ($settings['timeout'] ?? 60))
+            ->withHeaders([
+                'Authorization' => $this->authorizationHeader($settings),
+            ])
+            ->acceptJson();
+    }
+
+    /**
+     * Chattanooga's authorization header value.
      *
      * The API expects the literal string `Basic {SID}:{md5(token)}` — it
      * is NOT standard HTTP Basic auth, so the credential pair must not be
@@ -150,7 +221,7 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
      *
      * @param  array<string, mixed>  $settings
      */
-    private function client(array $settings): PendingRequest
+    private function authorizationHeader(array $settings): string
     {
         $sid = trim((string) ($settings['sid'] ?? ''));
         $token = trim((string) ($settings['token'] ?? ''));
@@ -159,12 +230,7 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
             throw new RuntimeException('Chattanooga feed credentials (sid / token) are not configured.');
         }
 
-        return Http::timeout((int) ($settings['timeout'] ?? 60))
-            ->retry((int) ($settings['retries'] ?? 2), 250)
-            ->withHeaders([
-                'Authorization' => 'Basic '.$sid.':'.md5($token),
-            ])
-            ->acceptJson();
+        return 'Basic '.$sid.':'.md5($token);
     }
 
     /**

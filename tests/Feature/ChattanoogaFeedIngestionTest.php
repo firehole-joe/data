@@ -318,10 +318,78 @@ class ChattanoogaFeedIngestionTest extends TestCase
             'guard: the literal header must differ from the base64 form',
         );
 
+        // Leg 1 (JSON generation) — literal auth, Accept: application/json.
         Http::assertSent(fn ($request) => str_contains($request->url(), '/items/product-feed')
-            && $request->header('Authorization')[0] === $expected);
+            && $request->header('Authorization')[0] === $expected
+            && str_contains($request->header('Accept')[0], 'application/json'));
 
-        Http::assertSent(fn ($request) => str_contains($request->url(), 'feeds.chattanoogashooting.com')
-            && $request->header('Authorization')[0] === $expected);
+        // Leg 2 (CSV download) — same literal auth, but Accept: */* so the
+        // .csv endpoint does not answer 406, and never Accept: application/json.
+        Http::assertSent(function ($request) use ($expected) {
+            if (! str_contains($request->url(), 'feeds.chattanoogashooting.com')) {
+                return false;
+            }
+
+            $accept = $request->header('Accept')[0] ?? '';
+
+            return $request->header('Authorization')[0] === $expected
+                && $accept === '*/*'
+                && ! str_contains($accept, 'application/json');
+        });
+    }
+
+    public function test_product_feed_generation_rate_limit_is_surfaced_clearly(): void
+    {
+        $this->app->forgetInstance(ChattanoogaFeedDriver::class);
+
+        Http::fake([
+            'api.chattanoogashooting.com/rest/v6/items/product-feed' => Http::response(
+                ['error' => 'too-many-requests'],
+                429,
+            ),
+            'feeds.chattanoogashooting.com/*' => Http::response('should never be reached', 200),
+        ]);
+
+        try {
+            app(ChattanoogaFeedDriver::class)->downloadFeed($this->chattanooga());
+            $this->fail('Expected a RuntimeException for the rate-limited product-feed endpoint.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('rate-limited', $e->getMessage());
+            $this->assertStringContainsString('wait before retrying', $e->getMessage());
+        }
+
+        // The CSV leg must not run once generation is throttled.
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'feeds.chattanoogashooting.com'));
+    }
+
+    public function test_a_429_without_a_body_marker_is_also_treated_as_rate_limited(): void
+    {
+        $this->app->forgetInstance(ChattanoogaFeedDriver::class);
+
+        Http::fake([
+            'api.chattanoogashooting.com/rest/v6/items/product-feed' => Http::response('', 429),
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Chattanooga feed export rate-limited');
+
+        app(ChattanoogaFeedDriver::class)->downloadFeed($this->chattanooga());
+    }
+
+    public function test_a_failed_csv_download_reports_the_http_status(): void
+    {
+        $this->app->forgetInstance(ChattanoogaFeedDriver::class);
+
+        Http::fake([
+            'api.chattanoogashooting.com/rest/v6/items/product-feed' => Http::response([
+                'product_feed' => ['url' => 'https://feeds.chattanoogashooting.com/exports/itemInventory.csv'],
+            ]),
+            'feeds.chattanoogashooting.com/*' => Http::response('gone', 404),
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Failed to download Chattanooga CSV: HTTP 404');
+
+        app(ChattanoogaFeedDriver::class)->downloadFeed($this->chattanooga());
     }
 }
