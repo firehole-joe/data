@@ -284,7 +284,7 @@ class ChattanoogaFeedIngestionTest extends TestCase
         $this->assertArrayHasKey('token', $settings);
     }
 
-    public function test_download_resolves_the_product_feed_url_with_basic_sid_md5_token_auth(): void
+    public function test_download_resolves_the_product_feed_url_with_literal_sid_md5_token_auth(): void
     {
         // Drop the setUp partial mock and exercise the real two-legged download.
         $this->app->forgetInstance(ChattanoogaFeedDriver::class);
@@ -309,7 +309,14 @@ class ChattanoogaFeedIngestionTest extends TestCase
         $this->assertSame($csv, (string) file_get_contents($path));
         @unlink($path);
 
-        $expected = 'Basic '.base64_encode('FIREHOLE:'.md5('super-secret-token'));
+        // The API wants the literal, un-encoded pair after "Basic " —
+        // not standard base64 HTTP Basic auth.
+        $expected = 'Basic FIREHOLE:'.md5('super-secret-token');
+        $this->assertNotSame(
+            'Basic '.base64_encode('FIREHOLE:'.md5('super-secret-token')),
+            $expected,
+            'guard: the literal header must differ from the base64 form',
+        );
 
         Http::assertSent(fn ($request) => str_contains($request->url(), '/items/product-feed')
             && $request->header('Authorization')[0] === $expected);

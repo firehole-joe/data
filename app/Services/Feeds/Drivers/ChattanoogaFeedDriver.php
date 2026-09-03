@@ -12,11 +12,14 @@ use RuntimeException;
 /**
  * Feed driver for Chattanooga Shooting Supplies (CSSI).
  *
- * Transport: the Chattanooga REST API (v6). Authentication is HTTP Basic
- * with the username set to the account SID and the password to the MD5
- * digest of the API token:
+ * Transport: the Chattanooga REST API (v6). Authentication is a custom
+ * header that only looks like HTTP Basic — the account SID and the MD5
+ * digest of the API token are sent as a literal, un-encoded string:
  *
- *     Authorization: Basic base64(SID . ':' . md5(TOKEN))
+ *     Authorization: Basic {SID}:{md5(TOKEN)}
+ *
+ * base64-encoding the pair or using withBasicAuth() returns
+ * `401 Bad Authorization`.
  *
  * Retrieval is two-legged. `GET /items/product-feed` asks Chattanooga to
  * generate a fresh inventory export and answers with
@@ -138,7 +141,12 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
     }
 
     /**
-     * A pending request carrying the Basic SID:md5(token) authorization.
+     * A pending request carrying Chattanooga's authorization header.
+     *
+     * The API expects the literal string `Basic {SID}:{md5(token)}` — it
+     * is NOT standard HTTP Basic auth, so the credential pair must not be
+     * base64-encoded and `withBasicAuth()` must not be used; either one
+     * returns `401 Bad Authorization`.
      *
      * @param  array<string, mixed>  $settings
      */
@@ -154,7 +162,7 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
         return Http::timeout((int) ($settings['timeout'] ?? 60))
             ->retry((int) ($settings['retries'] ?? 2), 250)
             ->withHeaders([
-                'Authorization' => 'Basic '.base64_encode($sid.':'.md5($token)),
+                'Authorization' => 'Basic '.$sid.':'.md5($token),
             ])
             ->acceptJson();
     }
