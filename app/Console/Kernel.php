@@ -12,7 +12,17 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        $schedule->command('feed:sync rsr --force')
+            ->dailyAt('04:00')
+            ->withoutOverlapping(60)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/feed-rsr.log'));
+
+        $schedule->command('feed:sync zanders --force')
+            ->dailyAt('04:30')
+            ->withoutOverlapping(60)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/feed-zanders.log'));
     }
 
     /**
