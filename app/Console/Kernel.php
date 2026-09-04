@@ -29,6 +29,12 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping(60)
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/feed-chattanooga.log'));
+
+        $schedule->command('feed:sync davidsons --force')
+            ->dailyAt('05:30')
+            ->withoutOverlapping(60)
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/feed-davidsons.log'));
     }
 
     /**

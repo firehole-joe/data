@@ -53,6 +53,7 @@ class DistributorSeeder extends Seeder
             array_intersect_key($configured, array_flip([
                 'host', 'port', 'username', 'password', 'passive', 'ssl', 'remote_path',
                 'base_uri', 'sid', 'token', 'api_key', 'api_secret',
+                'itemspec_path', 'qty_path',
             ])),
         );
     }
@@ -102,7 +103,7 @@ class DistributorSeeder extends Seeder
             [
                 'name' => "Davidson's",
                 'slug' => 'davidsons',
-                'transport_type' => 'ftp',
+                'transport_type' => 'sftp',
                 'driver_class' => DavidsonsFeedDriver::class,
             ],
             [

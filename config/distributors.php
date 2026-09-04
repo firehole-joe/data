@@ -42,4 +42,17 @@ return [
         'token' => env('CHATTANOOGA_TOKEN'),
     ],
 
+    'davidsons' => [
+        'transport' => 'sftp',
+        'host' => env('DAVIDSONS_SFTP_HOST', 'ftp.davidsons.com'),
+        'port' => (int) env('DAVIDSONS_SFTP_PORT', 22),
+        'username' => env('DAVIDSONS_SFTP_USERNAME'),
+        'password' => env('DAVIDSONS_SFTP_PASSWORD'),
+        // Current-generation files only — the driver merges these two by
+        // ItemNo; the legacy Itemspec.csv / Qty.csv are retired and are
+        // never requested.
+        'itemspec_path' => 'V2_Itemspec.csv',
+        'qty_path' => 'V2_Qty.csv',
+    ],
+
 ];

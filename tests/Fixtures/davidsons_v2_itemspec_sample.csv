@@ -1,0 +1,10 @@
+ItemNo,UPC,Brand,ItemDesc1,ItemDesc2,AmmoDesc1,ProdCat,Category,Subcategory,AmmoCat,AmmoCaliber,bullet_weight,bullet_type,round_per_box,box_per_case,QtyPerCase,DealerPrice,SalePrice
+DAV-PMC223,741 569-0704 30,PMC,PMC X-TAC,223 Rem 55gr FMJ 20rd,,Ammunition,Rifle Ammo,,Rifle,223 Rem,55,FMJ,20,,,6.85,
+DAV-FED9,604544617658,Federal,Federal American Eagle,9mm 115gr FMJ 50rd,,Ammunition,Handgun Ammo,,Handgun,9mm Luger,115,FMJ,50,,,9.05,7.99
+DAV-FED9-CASE,604544617658,Federal,Federal American Eagle,9mm 115gr FMJ 1000rd Case,,Ammunition,Handgun Ammo,,Handgun,9mm Luger,115,FMJ,50,20,1000,258.00,
+DAV-HOR65,090255805062,Hornady,,,Hornady Match 6.5 Creedmoor 140gr ELD Match 20rd,,,,,6.5 Creedmoor,140,ELD Match,20,,,25.75,0
+DAV-WIN12,020892019331,Winchester,Winchester Super-X,12ga 2.75in 00 Buck 5rd,,Ammunition,Shotshell,,Shotshell,12 Gauge,,,5,,,5.99,
+DAV-EDGE9,741569070256,PMC,PMC Bronze,9mm 115gr FMJ 50rd,,Ammunition,Handgun Ammo,,Handgun,9mm Luger,115,FMJ,50,,,9.05,20.00
+DAV-NOQTY,741569070263,PMC,PMC Bronze,9mm 124gr FMJ 50rd,,Ammunition,Handgun Ammo,,Handgun,9mm Luger,124,FMJ,50,,,9.15,
+DAV-SPR-HC,022188884012,Springfield Armory,Springfield Hellcat,9mm Pistol 13rd OSP,,Handguns,Pistols,Micro-Compact,,,,,,,,489.00,
+DAV-AERO-LWR,810099570017,Aero Precision,Aero Precision AR15,Stripped Lower Receiver Gen2,,Parts,Receivers,Lowers,,,,,,,,109.00,

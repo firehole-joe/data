@@ -88,8 +88,24 @@ class FeedItemDTOTest extends TestCase
             'quantity_available' => 0,
             'is_in_stock' => false,
             'raw_payload' => [],
+            'raw_round_count' => null,
         ];
 
         $this->assertSame($data, FeedItemDTO::fromArray($data)->toArray());
+    }
+
+    public function test_raw_round_count_is_captured_when_positive_and_null_otherwise(): void
+    {
+        $this->assertSame(500, FeedItemDTO::fromArray([
+            'distributor_sku' => 'A', 'quantity_available' => 1, 'raw_round_count' => '500',
+        ])->raw_round_count);
+
+        $this->assertNull(FeedItemDTO::fromArray([
+            'distributor_sku' => 'A', 'quantity_available' => 1, 'raw_round_count' => 0,
+        ])->raw_round_count);
+
+        $this->assertNull(FeedItemDTO::fromArray([
+            'distributor_sku' => 'A', 'quantity_available' => 1,
+        ])->raw_round_count);
     }
 }

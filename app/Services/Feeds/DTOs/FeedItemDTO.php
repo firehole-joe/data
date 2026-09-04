@@ -13,6 +13,10 @@ class FeedItemDTO
 {
     /**
      * @param  array<string, mixed>  $raw_payload  The untouched source row, kept for debugging/auditing.
+     * @param  ?int  $raw_round_count  An authoritative rounds-per-unit count the feed itself states for
+     *                                 this row (e.g. Davidson's `round_per_box`), independent of whatever
+     *                                 the shared master record says. Null when the feed carries no such
+     *                                 column and the round count must be inferred from the description.
      */
     public function __construct(
         public string $distributor_sku,
@@ -25,6 +29,7 @@ class FeedItemDTO
         public int $quantity_available,
         public bool $is_in_stock,
         public array $raw_payload = [],
+        public ?int $raw_round_count = null,
     ) {}
 
     /**
@@ -52,6 +57,7 @@ class FeedItemDTO
                 ? (bool) $data['is_in_stock']
                 : $quantity > 0,
             raw_payload: (array) ($data['raw_payload'] ?? []),
+            raw_round_count: self::nullablePositiveInt($data['raw_round_count'] ?? null),
         );
     }
 
@@ -71,6 +77,7 @@ class FeedItemDTO
             'quantity_available' => $this->quantity_available,
             'is_in_stock' => $this->is_in_stock,
             'raw_payload' => $this->raw_payload,
+            'raw_round_count' => $this->raw_round_count,
         ];
     }
 
@@ -92,5 +99,16 @@ class FeedItemDTO
         }
 
         return (float) $value;
+    }
+
+    private static function nullablePositiveInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        $int = (int) $value;
+
+        return $int > 0 ? $int : null;
     }
 }

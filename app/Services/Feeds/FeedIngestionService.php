@@ -170,6 +170,16 @@ class FeedIngestionService
             'is_in_stock' => $dto->quantity_available > 0,
         ]);
 
+        // A feed that states its own authoritative rounds-per-unit (e.g.
+        // Davidson's `round_per_box`) is pinned directly to the offering,
+        // independent of the shared master — this is what keeps a case
+        // SKU from ever depending on (or poisoning) another SKU's count.
+        // A reviewer's ledgered correction still overrules it below, in
+        // applyPricingGuardrail().
+        if ($dto->raw_round_count !== null) {
+            $product->round_count = $dto->raw_round_count;
+        }
+
         $isMeaningfulChange = ! $product->exists || $product->isDirty(self::TRACKED_COLUMNS);
 
         $product->last_feed_update_at = now();

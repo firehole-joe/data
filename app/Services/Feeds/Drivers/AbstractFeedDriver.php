@@ -631,7 +631,7 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
     /**
      * @param  resource|false  $stream
      */
-    private function streamToFile($stream, string $localPath): void
+    protected function streamToFile($stream, string $localPath): void
     {
         if (! is_resource($stream)) {
             throw new RuntimeException('Remote feed stream could not be opened.');
@@ -652,9 +652,15 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
     }
 
     /**
+     * A ready-to-use SFTP filesystem for the account's connection
+     * settings. `protected` (rather than `private`) so a driver that
+     * must fetch more than one remote file in a single {@see downloadFeed()}
+     * override — Davidson's `V2_Itemspec.csv` + `V2_Qty.csv`, for
+     * instance — can reuse one connection instead of duplicating it.
+     *
      * @param  array<string, mixed>  $settings
      */
-    private function sftpFilesystem(array $settings): Filesystem
+    protected function sftpFilesystem(array $settings): Filesystem
     {
         $provider = new SftpConnectionProvider(
             host: (string) ($settings['host'] ?? ''),
