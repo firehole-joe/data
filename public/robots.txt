@@ -1,5 +1,5 @@
 User-agent: *
-Disallow: /
+Allow: /api/v1/supply-summary
 Disallow: /dashboard
 Disallow: /report
-Allow: /api/v1/supply-summary
+Disallow: /
