@@ -29,6 +29,13 @@
         $labels = ['flagged' => 'Flagged for review', 'clean' => 'Passed review'];
         $pills[] = ['name' => 'review', 'value' => 'all', 'label' => $labels[$filters['review']] ?? $filters['review']];
     }
+    if (($filters['packaging'] ?? 'all') !== 'all') {
+        $labels = ['standard' => 'Standard boxes (≤ 50)', 'bulk' => 'Bulk / cases (≥ 100)'];
+        $packLabel = $labels[$filters['packaging']] ?? (ctype_digit((string) $filters['packaging'])
+            ? ((int) $filters['packaging'] >= 1000 ? '1000+ rounds' : $filters['packaging'].' rounds')
+            : $filters['packaging']);
+        $pills[] = ['name' => 'packaging', 'value' => 'all', 'label' => $packLabel];
+    }
     if ($filters['min_qty'] > 0) {
         $pills[] = ['name' => 'min_qty', 'value' => '', 'label' => 'Qty ≥ '.number_format($filters['min_qty'])];
     }

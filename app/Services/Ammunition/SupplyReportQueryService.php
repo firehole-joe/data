@@ -29,6 +29,15 @@ class SupplyReportQueryService
 
     public const REVIEW_STATUSES = ['all', 'flagged', 'clean'];
 
+    /** Packaging / pack-size buckets for the `packaging` filter. */
+    public const PACKAGING_OPTIONS = ['all', 'standard', 'bulk'];
+
+    /** A "standard box" tops out here (covers 20 / 25 / 50-round retail packs). */
+    public const PACKAGING_STANDARD_MAX = 50;
+
+    /** "Bulk / case" starts here (100 / 250 / 500 / 1000+ round packs). */
+    public const PACKAGING_BULK_MIN = 100;
+
     /** @var array<int, string> */
     public const SORTABLE = ['manufacturer', 'caliber', 'name', 'best_price', 'best_cpr', 'total_qty'];
 
@@ -67,6 +76,14 @@ class SupplyReportQueryService
             $review = 'all';
         }
 
+        // Accepts `packaging` (preferred) or the `pack_size` alias:
+        // "all" | "standard" | "bulk" | an exact round count | "1000" (== 1000+).
+        $packaging = (string) $request->input('packaging', $request->input('pack_size', 'all'));
+        if (! in_array($packaging, self::PACKAGING_OPTIONS, true)
+            && ! (ctype_digit($packaging) && (int) $packaging > 0)) {
+            $packaging = 'all';
+        }
+
         $sortBy = (string) $request->input('sort_by', 'manufacturer');
         if (! in_array($sortBy, self::SORTABLE, true)) {
             $sortBy = 'manufacturer';
@@ -85,6 +102,7 @@ class SupplyReportQueryService
             'grain_weights' => $this->intList($request->input('grain_weights', [])),
             'stock_status' => $stockStatus,
             'review' => $review,
+            'packaging' => $packaging,
             'min_qty' => max(0, (int) $request->input('min_qty', 0)),
             'search' => trim((string) $request->input('search', '')),
             'per_page' => $perPage,
@@ -100,7 +118,7 @@ class SupplyReportQueryService
      */
     public function baseOfferingQuery(array $filters): Builder
     {
-        return DistributorProduct::query()
+        $query = DistributorProduct::query()
             ->join('master_ammunition', 'master_ammunition.id', '=', 'distributor_products.master_ammunition_id')
             // 1:1 by the (distributor_id, distributor_sku) unique key, so
             // the reviewer-confirmed count is available to the pricing
@@ -141,6 +159,43 @@ class SupplyReportQueryService
                         ->orWhere('master_ammunition.name', 'like', $like);
                 });
             });
+
+        $this->applyPackagingFilter($query, (string) ($filters['packaging'] ?? 'all'));
+
+        return $query;
+    }
+
+    /** The effective rounds-per-unit SQL: offering count → override → master. */
+    private function effectiveRoundsExpr(): string
+    {
+        return 'COALESCE(distributor_products.round_count, '
+            .'NULLIF(distributor_sku_overrides.round_count, 0), master_ammunition.rounds_per_box)';
+    }
+
+    /**
+     * Narrow the offering query by pack size, judged on the effective
+     * rounds-per-unit. "standard" is <= 50 (20 / 25 / 50-round retail
+     * boxes, including a .22 LR 50-round box); "bulk" is >= 100 (100 /
+     * 250 / 500 / 1000+ cases and .22 LR bricks). A numeric value is an
+     * exact match, except "1000" which means 1000 or more.
+     */
+    private function applyPackagingFilter(Builder $query, string $packaging): void
+    {
+        if ($packaging === '' || $packaging === 'all') {
+            return;
+        }
+
+        $rounds = $this->effectiveRoundsExpr();
+
+        match (true) {
+            $packaging === 'standard' => $query
+                ->whereRaw("{$rounds} > 0")
+                ->whereRaw("{$rounds} <= ?", [self::PACKAGING_STANDARD_MAX]),
+            $packaging === 'bulk' => $query->whereRaw("{$rounds} >= ?", [self::PACKAGING_BULK_MIN]),
+            ctype_digit($packaging) && (int) $packaging >= 1000 => $query->whereRaw("{$rounds} >= ?", [1000]),
+            ctype_digit($packaging) => $query->whereRaw("{$rounds} = ?", [(int) $packaging]),
+            default => null,
+        };
     }
 
     /**
@@ -314,6 +369,7 @@ class SupplyReportQueryService
      *     calibers: array<string, int>,
      *     projectile_types: array<string, int>,
      *     grain_weights: array<int, int>,
+     *     packaging: array{standard: int, bulk: int},
      *     per_page_options: array<int, int>
      * }
      */
@@ -337,7 +393,39 @@ class SupplyReportQueryService
                 ['grain_weights', 'min_qty', 'search'],
                 true,
             ),
+            'packaging' => $this->packagingFacetCounts($filters),
             'per_page_options' => self::PER_PAGE_OPTIONS,
+        ];
+    }
+
+    /**
+     * Distinct master-SKU counts for the Standard / Bulk packaging chips,
+     * evaluated against the active scope but with the packaging filter
+     * itself neutralised so a chip never collapses its own count.
+     *
+     * @return array{standard: int, bulk: int}
+     */
+    private function packagingFacetCounts(array $filters): array
+    {
+        $scoped = array_merge($filters, ['packaging' => 'all']);
+        $rounds = $this->effectiveRoundsExpr();
+
+        $row = $this->baseOfferingQuery($scoped)->toBase()
+            ->selectRaw(
+                "COUNT(DISTINCT CASE WHEN {$rounds} > 0 AND {$rounds} <= ? "
+                .'THEN distributor_products.master_ammunition_id END) as standard_count',
+                [self::PACKAGING_STANDARD_MAX],
+            )
+            ->selectRaw(
+                "COUNT(DISTINCT CASE WHEN {$rounds} >= ? "
+                .'THEN distributor_products.master_ammunition_id END) as bulk_count',
+                [self::PACKAGING_BULK_MIN],
+            )
+            ->first();
+
+        return [
+            'standard' => (int) ($row->standard_count ?? 0),
+            'bulk' => (int) ($row->bulk_count ?? 0),
         ];
     }
 
@@ -357,6 +445,7 @@ class SupplyReportQueryService
             $scoped[$key] = match ($key) {
                 'search' => '',
                 'min_qty' => 0,
+                'packaging' => 'all',
                 default => [],
             };
         }

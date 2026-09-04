@@ -14,7 +14,9 @@
     $selectedDistributors = $filters['distributor_ids'];
 
     $hasActiveFilters = $selectedCalibers || $selectedProjectiles || $selectedGrains || $selectedDistributors
-        || $filters['stock_status'] !== 'all' || $filters['review'] !== 'all' || $filters['min_qty'] > 0 || $filters['search'] !== ''
+        || $filters['stock_status'] !== 'all' || $filters['review'] !== 'all'
+        || ($filters['packaging'] ?? 'all') !== 'all'
+        || $filters['min_qty'] > 0 || $filters['search'] !== ''
         || $filters['per_page'] !== SupplyReportQueryService::DEFAULT_PER_PAGE
         || $filters['sort_by'] !== 'manufacturer' || $filters['sort_dir'] !== 'asc';
 
@@ -183,17 +185,48 @@
                 </div>
             </div>
 
+            {{-- Only surface the Review filter when there is something to
+                 review, or the visitor is already filtering on it. --}}
+            @if ($showReviewFilter ?? (($flaggedCount ?? 0) > 0))
+                <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                    Review
+                    <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Review status">
+                        @foreach (['all' => 'All', 'clean' => 'Passed', 'flagged' => 'Flagged'] as $value => $label)
+                            @php $on = $filters['review'] === $value; @endphp
+                            <label class="cursor-pointer select-none">
+                                <input type="radio" name="review" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                                <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
+                                    {{ $label }}
+                                    @if ($value === 'flagged' && ($stats['needs_review'] ?? 0) > 0)
+                                        <span class="rounded-full bg-amber-500/20 px-1 text-[9px] tabular-nums text-amber-700 dark:text-amber-300">{{ number_format($stats['needs_review']) }}</span>
+                                    @endif
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
+            {{-- Packaging / pack size --}}
             <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-                Review
-                <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Review status">
-                    @foreach (['all' => 'All', 'clean' => 'Passed', 'flagged' => 'Flagged'] as $value => $label)
-                        @php $on = $filters['review'] === $value; @endphp
+                Packaging
+                <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Pack size">
+                    @php
+                        $packaging = $filters['packaging'] ?? 'all';
+                        $packOptions = [
+                            'all' => ['label' => 'All', 'count' => null],
+                            'standard' => ['label' => 'Standard Boxes', 'count' => $facets['packaging']['standard'] ?? null],
+                            'bulk' => ['label' => 'Bulk / Cases', 'count' => $facets['packaging']['bulk'] ?? null],
+                        ];
+                    @endphp
+                    @foreach ($packOptions as $value => $opt)
+                        @php $on = $packaging === $value; @endphp
                         <label class="cursor-pointer select-none">
-                            <input type="radio" name="review" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                            <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
                             <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
-                                {{ $label }}
-                                @if ($value === 'flagged' && ($stats['needs_review'] ?? 0) > 0)
-                                    <span class="rounded-full bg-amber-500/20 px-1 text-[9px] tabular-nums text-amber-700 dark:text-amber-300">{{ number_format($stats['needs_review']) }}</span>
+                                {{ $opt['label'] }}
+                                @if ($opt['count'] !== null)
+                                    <span class="rounded-full bg-black/10 px-1 text-[9px] tabular-nums dark:bg-white/15">{{ number_format($opt['count']) }}</span>
                                 @endif
                             </span>
                         </label>
@@ -557,7 +590,7 @@
                 if (name === 'search' || name === 'min_qty') {
                     var input = form.querySelector('[name="' + name + '"]');
                     if (input) input.value = '';
-                } else if (name === 'stock_status' || name === 'review') {
+                } else if (name === 'stock_status' || name === 'review' || name === 'packaging') {
                     var radio = form.querySelector('[name="' + name + '"][value="' + value + '"]');
                     if (radio) radio.checked = true;
                 } else {

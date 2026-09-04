@@ -39,6 +39,7 @@ class SupplyReportController extends Controller
         'grain_weights',
         'stock_status',
         'review',
+        'packaging',
         'min_qty',
         'search',
         'per_page',
@@ -159,15 +160,39 @@ class SupplyReportController extends Controller
 
         $filters = $query->normalizeFilters($request);
 
+        // Total offerings still awaiting review, catalog-wide (independent
+        // of the active filter scope). The Review status filter is only
+        // worth showing when there is something to review — or when the
+        // visitor is already filtering on `review`.
+        $flaggedCount = $this->flaggedOfferingCount();
+
         return view('supply.dashboard', [
             'masters' => $query->paginate($filters),
             'stats' => $query->stats($filters),
             'facets' => $query->facets($filters),
             'filters' => $filters,
             'perPageOptions' => SupplyReportQueryService::PER_PAGE_OPTIONS,
+            'flaggedCount' => $flaggedCount,
+            'showReviewFilter' => $flaggedCount > 0 || $request->has('review'),
             'canResolve' => $request->user()?->isAdmin() === true
                 || $request->session()->get('feed_admin_authenticated') === true,
         ]);
+    }
+
+    /**
+     * Catalog-wide count of offerings flagged for review (tracked master,
+     * not reviewer-dismissed).
+     */
+    private function flaggedOfferingCount(): int
+    {
+        return DistributorProduct::query()
+            ->where('distributor_products.needs_review', true)
+            ->where('distributor_products.is_ignored', false)
+            ->whereExists(fn ($q) => $q->selectRaw('1')
+                ->from('master_ammunition')
+                ->whereColumn('master_ammunition.id', 'distributor_products.master_ammunition_id')
+                ->where('master_ammunition.is_tracked_in_report', true))
+            ->count();
     }
 
     /**
