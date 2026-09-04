@@ -33,9 +33,17 @@ class DistributorSeeder extends Seeder
     }
 
     /**
-     * Connection settings for a distributor: a per-distributor block from
-     * config/distributors.php when one exists, otherwise an empty
-     * credential scaffold shaped for the transport type.
+     * Connection settings for a distributor: every field from its
+     * `config/distributors.php` block, when one exists, laid directly
+     * into `connection_settings` — this is what lets a freshly seeded
+     * row connect immediately, without a trip through the credential
+     * admin UI first. A distributor with no config block (credentials
+     * not yet known) still gets an empty, nullable scaffold shaped for
+     * its transport type so the admin UI has fields to fill in.
+     *
+     * Explicitly pulling in the whole config block (rather than a
+     * hand-maintained allowlist of known keys) means a new setting a
+     * driver needs never has to be separately taught to the seeder.
      *
      * @param  array{slug: string, transport_type: string}  $distributor
      * @return array<string, mixed>
@@ -44,18 +52,7 @@ class DistributorSeeder extends Seeder
     {
         $configured = (array) config("distributors.{$distributor['slug']}", []);
 
-        if ($configured === []) {
-            return $this->connectionScaffold($distributor['transport_type']);
-        }
-
-        return array_merge(
-            $this->connectionScaffold($distributor['transport_type']),
-            array_intersect_key($configured, array_flip([
-                'host', 'port', 'username', 'password', 'passive', 'ssl', 'remote_path',
-                'base_uri', 'sid', 'token', 'api_key', 'api_secret',
-                'itemspec_path', 'qty_path',
-            ])),
-        );
+        return array_merge($this->connectionScaffold($distributor['transport_type']), $configured);
     }
 
     /**

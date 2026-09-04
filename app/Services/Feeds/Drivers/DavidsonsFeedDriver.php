@@ -78,7 +78,7 @@ class DavidsonsFeedDriver extends AbstractFeedDriver
      */
     public function downloadFeed(Distributor $distributor): string
     {
-        $settings = (array) ($distributor->connection_settings ?? []);
+        $settings = $this->settingsFor($distributor);
         $filesystem = $this->sftpFilesystem($settings);
 
         $itemspecRemote = $this->remoteFileName($settings, 'itemspec_path', self::ITEMSPEC_FILE);

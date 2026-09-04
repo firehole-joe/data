@@ -124,7 +124,7 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
 
     public function downloadFeed(Distributor $distributor): string
     {
-        $settings = (array) ($distributor->connection_settings ?? []);
+        $settings = $this->settingsFor($distributor);
         $transport = $this->transportFor($distributor, $settings);
 
         $localPath = tempnam(sys_get_temp_dir(), $this->feedSlug().'_feed_');
@@ -190,7 +190,7 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
 
     public function testConnection(Distributor $distributor): bool
     {
-        $settings = (array) ($distributor->connection_settings ?? []);
+        $settings = $this->settingsFor($distributor);
         $transport = $this->transportFor($distributor, $settings);
 
         try {
@@ -729,6 +729,42 @@ abstract class AbstractFeedDriver implements FeedDriverInterface
     /* -------------------------------------------------------------------- */
     /*  Path / config helpers */
     /* -------------------------------------------------------------------- */
+
+    /**
+     * The connection settings to use for a distributor: its own
+     * `connection_settings` row, with any key that is missing, null, or
+     * a blank string backfilled from the matching `config/distributors.php`
+     * block. A row's own explicitly-set value (including `false` or `0`)
+     * always wins over config.
+     *
+     * This is what keeps a distributor connectable when its
+     * `connection_settings` is null or incomplete — e.g. a row created
+     * outside {@see \Database\Seeders\DistributorSeeder} (which normally
+     * copies the config block in at seed time), or one seeded before its
+     * environment credentials existed — instead of failing with an empty
+     * host/username the moment the driver tries to connect.
+     *
+     * @return array<string, mixed>
+     */
+    protected function settingsFor(Distributor $distributor): array
+    {
+        $stored = (array) ($distributor->connection_settings ?? []);
+        $configured = (array) config("distributors.{$distributor->slug}", []);
+
+        if ($configured === []) {
+            return $stored;
+        }
+
+        $settings = $configured;
+
+        foreach ($stored as $key => $value) {
+            if ($value !== null && $value !== '') {
+                $settings[$key] = $value;
+            }
+        }
+
+        return $settings;
+    }
 
     /**
      * @param  array<string, mixed>  $settings

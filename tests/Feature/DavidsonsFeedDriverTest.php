@@ -191,4 +191,81 @@ class DavidsonsFeedDriverTest extends TestCase
         $this->assertSame('V2_Itemspec.csv', $settings['itemspec_path']);
         $this->assertSame('V2_Qty.csv', $settings['qty_path']);
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  connection_settings falls back to config when null / incomplete */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolvedSettings(Distributor $distributor): array
+    {
+        $method = new \ReflectionMethod(DavidsonsFeedDriver::class, 'settingsFor');
+        $method->setAccessible(true);
+
+        return $method->invoke(new DavidsonsFeedDriver, $distributor);
+    }
+
+    public function test_an_empty_connection_settings_row_falls_back_entirely_to_config(): void
+    {
+        config(['distributors.davidsons' => [
+            'transport' => 'sftp',
+            'host' => 'ftp.davidsons.com',
+            'port' => 22,
+            'username' => 'configured-user',
+            'password' => 'configured-pass',
+            'itemspec_path' => 'V2_Itemspec.csv',
+            'qty_path' => 'V2_Qty.csv',
+        ]]);
+
+        // `connection_settings` is a NOT NULL column — an "empty" row in
+        // practice is `[]` (or, per Distributor::connection_settings ??
+        // [] throughout the codebase, whatever a genuinely-null decrypted
+        // value would coalesce to), not a literal SQL NULL.
+        $davidsons = $this->distributor(['connection_settings' => []]);
+
+        $settings = $this->resolvedSettings($davidsons);
+
+        $this->assertSame('ftp.davidsons.com', $settings['host']);
+        $this->assertSame(22, $settings['port']);
+        $this->assertSame('configured-user', $settings['username']);
+        $this->assertSame('configured-pass', $settings['password']);
+        $this->assertSame('V2_Itemspec.csv', $settings['itemspec_path']);
+        $this->assertSame('V2_Qty.csv', $settings['qty_path']);
+    }
+
+    public function test_blank_fields_in_a_stored_row_are_backfilled_from_config_without_losing_the_rest(): void
+    {
+        config(['distributors.davidsons' => [
+            'host' => 'ftp.davidsons.com',
+            'port' => 22,
+            'username' => 'configured-user',
+            'password' => 'configured-pass',
+        ]]);
+
+        // The row has an explicit host but blank/missing credentials —
+        // e.g. an admin set the host through the UI before the
+        // environment's username/password existed.
+        $davidsons = $this->distributor(['connection_settings' => [
+            'host' => 'override.davidsons.example',
+            'username' => '',
+            'password' => null,
+        ]]);
+
+        $settings = $this->resolvedSettings($davidsons);
+
+        $this->assertSame('override.davidsons.example', $settings['host'], "the row's own value always wins");
+        $this->assertSame('configured-user', $settings['username'], 'blank stored value falls back to config');
+        $this->assertSame('configured-pass', $settings['password'], 'null stored value falls back to config');
+    }
+
+    public function test_settings_are_untouched_when_there_is_no_config_block_for_the_slug(): void
+    {
+        config(['distributors.davidsons' => null]);
+
+        $davidsons = $this->distributor(['connection_settings' => ['host' => 'only.the.row.example']]);
+
+        $this->assertSame(['host' => 'only.the.row.example'], $this->resolvedSettings($davidsons));
+    }
 }

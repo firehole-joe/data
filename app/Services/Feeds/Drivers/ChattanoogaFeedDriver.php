@@ -90,7 +90,7 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
      */
     public function downloadFeed(Distributor $distributor): string
     {
-        $settings = (array) ($distributor->connection_settings ?? []);
+        $settings = $this->settingsFor($distributor);
 
         $csvUrl = $this->resolveProductFeedUrl($settings);
 
@@ -129,7 +129,7 @@ class ChattanoogaFeedDriver extends AbstractFeedDriver
 
     public function testConnection(Distributor $distributor): bool
     {
-        $settings = (array) ($distributor->connection_settings ?? []);
+        $settings = $this->settingsFor($distributor);
 
         try {
             return $this->client($settings)
