@@ -660,4 +660,217 @@ class SupplyReportQueryService
     {
         return $value === null ? null : round((float) $value, $precision);
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  Public supply-summary API (app/Http/Controllers/Api) */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Caliber groups exposed by the public supply-summary API: the
+     * canonical `master_ammunition.caliber` value(s) each display label
+     * covers, and the FMJ-focused `bullet_type` values counted toward it.
+     *
+     * `.223 Remington` is folded into "5.56 NATO" (commercially
+     * interchangeable FMJ training loads). `.357 Magnum` additionally
+     * allows `SP` (jacketed soft point — AmmoAttributeExtractor's
+     * canonical label for "JSP") since that, alongside FMJ, is the
+     * standard training/target load for that caliber.
+     *
+     * @var array<string, array{calibers: array<int, string>, bullet_types: array<int, string>}>
+     */
+    public const PUBLIC_API_CALIBER_GROUPS = [
+        '9mm Luger' => [
+            'calibers' => ['9mm Luger'],
+            'bullet_types' => ['FMJ'],
+        ],
+        '5.56 NATO' => [
+            'calibers' => ['5.56x45mm NATO', '.223 Remington'],
+            'bullet_types' => ['FMJ'],
+        ],
+        '.300 AAC Blackout' => [
+            'calibers' => ['.300 AAC Blackout'],
+            'bullet_types' => ['FMJ'],
+        ],
+        '.45 ACP' => [
+            'calibers' => ['.45 ACP'],
+            'bullet_types' => ['FMJ'],
+        ],
+        '.357 Magnum' => [
+            'calibers' => ['.357 Magnum'],
+            'bullet_types' => ['FMJ', 'SP'],
+        ],
+    ];
+
+    /**
+     * The full payload behind `GET /api/v1/supply-summary`: a standard
+     * retail-box (<= 50 rd) breakdown and a bulk/case (>= 100 rd)
+     * breakdown for each FMJ-focused caliber group in
+     * {@see self::PUBLIC_API_CALIBER_GROUPS}.
+     *
+     * @return array{calibers: array<string, mixed>, bulk_offerings: array<string, mixed>}
+     */
+    public function publicApiSummary(): array
+    {
+        $calibers = [];
+        $bulk = [];
+
+        foreach (self::PUBLIC_API_CALIBER_GROUPS as $label => $group) {
+            $calibers[$label] = $this->publicStandardBoxSummary($group['calibers'], $group['bullet_types']);
+            $bulk[$label] = $this->publicBulkSummary($group['calibers'], $group['bullet_types']);
+        }
+
+        return [
+            'calibers' => $calibers,
+            'bulk_offerings' => $bulk,
+        ];
+    }
+
+    /**
+     * The base offering scope for one public-API caliber group: every
+     * default (unfiltered) offering for the given calibers and
+     * FMJ-focused bullet types. A flagged offering carries a distrusted
+     * price and must never surface in a public report.
+     *
+     * @param  array<int, string>  $calibers
+     * @param  array<int, string>  $bulletTypes
+     */
+    private function publicApiOfferingQuery(array $calibers, array $bulletTypes): Builder
+    {
+        return $this->baseOfferingQuery($this->normalizeFilters(new Request))
+            ->whereIn('master_ammunition.caliber', $calibers)
+            ->whereIn('master_ammunition.bullet_type', $bulletTypes)
+            ->where('distributor_products.needs_review', false);
+    }
+
+    /**
+     * Standard-box (<= 50 rd) stats for one caliber group: catalog /
+     * stock counts across every tracked SKU, and pricing derived only
+     * from the in-stock, priced subset.
+     *
+     * @param  array<int, string>  $calibers
+     * @param  array<int, string>  $bulletTypes
+     * @return array<string, mixed>
+     */
+    private function publicStandardBoxSummary(array $calibers, array $bulletTypes): array
+    {
+        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes);
+        $this->applyPackagingFilter($base, 'standard');
+
+        $total = (clone $base)->toBase()->count();
+        $inStock = (clone $base)->toBase()->where('distributor_products.quantity_available', '>', 0)->count();
+        $outOfStock = max(0, $total - $inStock);
+        $percentage = $total > 0 ? round($inStock / $total * 100, 1) : 0.0;
+
+        $rounds = $this->effectiveRoundsExpr();
+        $cprExpr = "distributor_products.wholesale_price * 1.0 / {$rounds}";
+
+        $priced = (clone $base)
+            ->where('distributor_products.quantity_available', '>', 0)
+            ->where('distributor_products.wholesale_price', '>', 0)
+            ->whereRaw("{$rounds} > 0");
+
+        $agg = (clone $priced)->toBase()
+            ->selectRaw("MIN({$cprExpr}) as min_cpr")
+            ->selectRaw("AVG({$cprExpr}) as avg_cpr")
+            ->first();
+
+        $best = (clone $priced)
+            ->select('distributor_products.*')
+            ->selectRaw("{$rounds} as effective_round_count")
+            ->selectRaw("{$cprExpr} as computed_cpr")
+            ->with(['distributor', 'masterAmmunition'])
+            ->orderByRaw("{$cprExpr} asc")
+            ->first();
+
+        return [
+            'total_catalog_offerings' => $total,
+            'in_stock_count' => $inStock,
+            'out_of_stock_count' => $outOfStock,
+            'in_stock_percentage' => number_format($percentage, 1).'%',
+            'lowest_cost_per_round' => $this->cprPair($agg->min_cpr ?? null),
+            'average_cost_per_round' => $this->cprPair($agg->avg_cpr ?? null),
+            'best_value_offering' => $best ? $this->publicOfferingSummary($best, includeSpecs: true) : null,
+        ];
+    }
+
+    /**
+     * Bulk/case (>= 100 rd) stats for one caliber group, scoped to
+     * currently in-stock lines only.
+     *
+     * @param  array<int, string>  $calibers
+     * @param  array<int, string>  $bulletTypes
+     * @return array<string, mixed>
+     */
+    private function publicBulkSummary(array $calibers, array $bulletTypes): array
+    {
+        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes);
+        $this->applyPackagingFilter($base, 'bulk');
+        $base->where('distributor_products.quantity_available', '>', 0);
+
+        $count = (clone $base)->toBase()->count();
+
+        $rounds = $this->effectiveRoundsExpr();
+        $cprExpr = "distributor_products.wholesale_price * 1.0 / {$rounds}";
+
+        $priced = (clone $base)
+            ->where('distributor_products.wholesale_price', '>', 0)
+            ->whereRaw("{$rounds} > 0");
+
+        $min = (clone $priced)->toBase()->selectRaw("MIN({$cprExpr}) as min_cpr")->value('min_cpr');
+
+        $topDeal = (clone $priced)
+            ->select('distributor_products.*')
+            ->selectRaw("{$rounds} as effective_round_count")
+            ->selectRaw("{$cprExpr} as computed_cpr")
+            ->with(['distributor', 'masterAmmunition'])
+            ->orderByRaw("{$cprExpr} asc")
+            ->first();
+
+        return [
+            'available_bulk_skus_count' => $count,
+            'lowest_bulk_cost_per_round' => $this->cprPair($min),
+            'top_bulk_deal' => $topDeal ? $this->publicOfferingSummary($topDeal, includeSpecs: false) : null,
+        ];
+    }
+
+    /**
+     * The public-API shape for one offering. `includeSpecs` adds
+     * `grain_weight` / `bullet_type` (the standard-box "best value"
+     * shape); the bulk "top deal" shape omits them.
+     *
+     * @return array<string, mixed>
+     */
+    private function publicOfferingSummary(DistributorProduct $offering, bool $includeSpecs): array
+    {
+        $master = $offering->masterAmmunition;
+
+        $summary = [
+            'brand' => $master?->manufacturer,
+        ];
+
+        if ($includeSpecs) {
+            $summary['grain_weight'] = $master?->bullet_weight_gr;
+            $summary['bullet_type'] = $master?->bullet_type;
+        }
+
+        $summary['round_count'] = (int) $offering->getAttribute('effective_round_count');
+        $summary['wholesale_price'] = $this->asFloat($offering->wholesale_price, 2);
+        $summary['cost_per_round'] = $this->asFloat($offering->getAttribute('computed_cpr'), 4);
+        $summary['distributor'] = $offering->distributor?->name;
+
+        return $summary;
+    }
+
+    /**
+     * @return array{formatted: ?string, raw: ?float}
+     */
+    private function cprPair($value): array
+    {
+        $raw = $this->asFloat($value, 4);
+
+        return [
+            'formatted' => $raw !== null ? '$'.number_format($raw, 4) : null,
+            'raw' => $raw,
+        ];
+    }
 }

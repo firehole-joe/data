@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\PublicSupplyReportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -16,4 +17,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
+});
+
+/*
+| Public supply-report syndication feed — token-gated, not a user
+| session. Consumed by firehole.com/arms/2026-supply/ (WordPress /
+| ThemeCo X-Pro Cornerstone Looper / WP Shortcodes) and research tools.
+*/
+Route::middleware('supply_report.api_key')->prefix('v1')->group(function () {
+    Route::get('/supply-summary', [PublicSupplyReportController::class, 'summary'])
+        ->name('api.supply-summary');
 });

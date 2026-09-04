@@ -31,4 +31,21 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Public Supply Report API
+    |--------------------------------------------------------------------------
+    |
+    | Shared key gating the public /api/v1/supply-summary feed consumed by
+    | firehole.com/arms/2026-supply/ (WordPress / ThemeCo X-Pro Cornerstone
+    | Looper) and research assistants. Accepted as ?api_key=... or an
+    | `Authorization: Bearer ...` header — see
+    | App\Http\Middleware\EnsureValidSupplyReportApiKey.
+    |
+    */
+
+    'reports' => [
+        'api_key' => env('SUPPLY_REPORT_API_KEY', 'firehole-supply-report-2026'),
+    ],
+
 ];
