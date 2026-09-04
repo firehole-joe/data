@@ -256,4 +256,64 @@ class SupplyDashboardFilterTest extends TestCase
             ->assertSee('Standard Boxes')
             ->assertSee('Bulk / Cases');
     }
+
+    /* ----------------------------------------------------------------- */
+    /*  Dedicated packaging accordion */
+    /* ----------------------------------------------------------------- */
+
+    public function test_packaging_renders_in_its_own_dedicated_accordion_with_the_granular_pills(): void
+    {
+        $this->seedPackSizes();
+
+        $response = $this->get(route('supply.dashboard'))->assertOk();
+
+        // Dedicated section header + both control groups live inside an accordion.
+        $response->assertSeeInOrder(
+            ['Packaging &amp; Pack Size', 'data-accordion-body', 'aria-label="Pack size"', 'aria-label="Pack size — exact rounds"', 'Quick pick'],
+            false,
+        );
+        $response->assertSee('data-accordion', false);
+    }
+
+    public function test_collapsed_packaging_accordion_shows_an_active_badge_and_a_clear_control(): void
+    {
+        $this->seedPackSizes();
+
+        // Numeric selection → "50 rds" badge in the header + a Clear link,
+        // and the accordion defaults open (body carries is-open).
+        $this->get(route('supply.dashboard', ['packaging' => '50']))
+            ->assertOk()
+            ->assertSeeInOrder(['Packaging &amp; Pack Size', '50 rds', '>Clear<'], false)
+            ->assertSee('data-pill-name="packaging" data-pill-value="all"', false)
+            ->assertSee('data-accordion-body class="is-open"', false);
+
+        // A named bucket → "Bulk / Cases" badge.
+        $this->get(route('supply.dashboard', ['packaging' => 'bulk']))
+            ->assertOk()
+            ->assertSeeInOrder(['Packaging &amp; Pack Size', 'Bulk / Cases', '>Clear<'], false);
+
+        // No packaging filter → no badge, no Clear.
+        $this->get(route('supply.dashboard', ['packaging' => 'all']))
+            ->assertOk()
+            ->assertDontSee('>Clear<', false);
+    }
+
+    public function test_granular_pill_facet_counts_render_on_the_accordion_and_dim_at_zero(): void
+    {
+        // Only a 50-round master exists → the 20 / 100 / 500 / 1000 pills
+        // all show a 0 count and are visually muted.
+        $d = $this->distributor(['slug' => 'rsr']);
+        $this->listing($this->master(['name' => 'ONLY 50', 'rounds_per_box' => 50]), $d);
+
+        $response = $this->get(route('supply.dashboard'))->assertOk();
+
+        $bySize = $response->viewData('facets')['packaging']['by_size'];
+        $this->assertSame(['20' => 0, '50' => 1, '100' => 0, '500' => 0, '1000' => 0], [
+            '20' => $bySize[20], '50' => $bySize[50], '100' => $bySize[100],
+            '500' => $bySize[500], '1000' => $bySize[1000],
+        ]);
+
+        // The zero-count granular pills carry the muted classes.
+        $response->assertSee('border-line/50 text-ink-subtle/60', false);
+    }
 }

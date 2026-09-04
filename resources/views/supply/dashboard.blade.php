@@ -207,59 +207,6 @@
                 </div>
             @endif
 
-            {{-- Packaging / pack size --}}
-            @php
-                $packaging = (string) ($filters['packaging'] ?? 'all');
-                $bySize = $facets['packaging']['by_size'] ?? [];
-                $packOptions = [
-                    'all' => ['label' => 'All', 'count' => null],
-                    'standard' => ['label' => 'Standard Boxes', 'count' => $facets['packaging']['standard'] ?? null],
-                    'bulk' => ['label' => 'Bulk / Cases', 'count' => $facets['packaging']['bulk'] ?? null],
-                ];
-                $packGranular = [
-                    '20' => ['label' => '20', 'count' => $bySize[20] ?? null],
-                    '50' => ['label' => '50', 'count' => $bySize[50] ?? null],
-                    '100' => ['label' => '100', 'count' => $bySize[100] ?? null],
-                    '500' => ['label' => '500', 'count' => $bySize[500] ?? null],
-                    '1000' => ['label' => '1000+', 'count' => $bySize[1000] ?? null],
-                ];
-            @endphp
-            <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-                Packaging
-                <div class="flex flex-wrap items-center gap-1.5">
-                    <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Pack size">
-                        @foreach ($packOptions as $value => $opt)
-                            @php $on = $packaging === $value; @endphp
-                            <label class="cursor-pointer select-none">
-                                <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
-                                <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
-                                    {{ $opt['label'] }}
-                                    @if ($opt['count'] !== null)
-                                        <span class="rounded-full bg-black/10 px-1 text-[9px] tabular-nums dark:bg-white/15">{{ number_format($opt['count']) }}</span>
-                                    @endif
-                                </span>
-                            </label>
-                        @endforeach
-                    </div>
-
-                    {{-- Granular quick-size pills --}}
-                    <div class="inline-flex flex-wrap items-center gap-1" role="group" aria-label="Pack size — exact rounds">
-                        @foreach ($packGranular as $value => $opt)
-                            @php $on = $packaging === $value; @endphp
-                            <label class="cursor-pointer select-none">
-                                <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
-                                <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums transition {{ $on ? 'border-accent bg-accent text-accent-fg' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
-                                    {{ $opt['label'] }}
-                                    @if ($opt['count'] !== null)
-                                        <span class="rounded-full bg-black/10 px-1 text-[9px] dark:bg-white/15">{{ number_format($opt['count']) }}</span>
-                                    @endif
-                                </span>
-                            </label>
-                        @endforeach
-                    </div>
-                </div>
-            </div>
-
             <label class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
                 Min qty
                 <input type="number" name="min_qty" min="0" value="{{ $filters['min_qty'] ?: '' }}" placeholder="0"
@@ -368,6 +315,108 @@
                 'unit' => ' gr',
             ])
         </x-ui.accordion>
+
+        {{-- Accordion 5: Packaging & Pack Size (dedicated) --}}
+        @php
+            $packaging = (string) ($filters['packaging'] ?? 'all');
+            $packActive = $packaging !== 'all';
+            $bySize = $facets['packaging']['by_size'] ?? [];
+            $packOptions = [
+                'all' => ['label' => 'All', 'count' => null],
+                'standard' => ['label' => 'Standard Boxes', 'count' => $facets['packaging']['standard'] ?? null],
+                'bulk' => ['label' => 'Bulk / Cases', 'count' => $facets['packaging']['bulk'] ?? null],
+            ];
+            $packGranular = [
+                '20' => ['label' => '20 rds', 'count' => $bySize[20] ?? null],
+                '50' => ['label' => '50 rds', 'count' => $bySize[50] ?? null],
+                '100' => ['label' => '100 rds', 'count' => $bySize[100] ?? null],
+                '500' => ['label' => '500 rds', 'count' => $bySize[500] ?? null],
+                '1000' => ['label' => '1000+ rds', 'count' => $bySize[1000] ?? null],
+            ];
+            $packBadge = match (true) {
+                $packaging === 'standard' => 'Standard Boxes',
+                $packaging === 'bulk' => 'Bulk / Cases',
+                ctype_digit($packaging) && (int) $packaging >= 1000 => '1000+ rds',
+                ctype_digit($packaging) => $packaging.' rds',
+                default => null,
+            };
+        @endphp
+        <div class="overflow-hidden rounded-xl border border-line bg-surface" data-accordion>
+            <div class="flex items-center gap-2 px-3.5 py-2.5">
+                <button
+                    type="button"
+                    data-accordion-trigger
+                    aria-expanded="{{ $packActive ? 'true' : 'false' }}"
+                    class="flex flex-1 items-center justify-between gap-3 text-left transition hover:text-ink"
+                >
+                    <span class="flex flex-wrap items-center gap-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wider text-ink">Packaging &amp; Pack Size</span>
+                        @if ($packActive && $packBadge)
+                            <span class="inline-flex items-center rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">{{ $packBadge }}</span>
+                        @endif
+                    </span>
+                    <svg
+                        data-accordion-chevron
+                        class="h-4 w-4 shrink-0 text-ink-subtle transition-transform duration-200 {{ $packActive ? 'rotate-180' : '' }}"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                    ><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                @if ($packActive)
+                    <button
+                        type="button"
+                        data-pill-remove data-pill-name="packaging" data-pill-value="all"
+                        class="shrink-0 text-[10px] font-medium text-ink-muted underline decoration-dotted underline-offset-2 transition hover:text-ink"
+                    >Clear</button>
+                @endif
+            </div>
+
+            <div data-accordion-body class="{{ $packActive ? 'is-open' : '' }}">
+                <div>
+                    <div class="space-y-3 border-t border-line px-3.5 py-3">
+                        {{-- Primary segmented group --}}
+                        <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Pack size">
+                            @foreach ($packOptions as $value => $opt)
+                                @php $on = $packaging === $value; @endphp
+                                <label class="cursor-pointer select-none">
+                                    <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                                    <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
+                                        {{ $opt['label'] }}
+                                        @if ($opt['count'] !== null)
+                                            <span class="rounded-full bg-black/10 px-1 text-[9px] tabular-nums dark:bg-white/15 {{ $opt['count'] === 0 && ! $on ? 'opacity-40' : '' }}">{{ number_format($opt['count']) }}</span>
+                                        @endif
+                                    </span>
+                                </label>
+                            @endforeach
+                        </div>
+
+                        {{-- Granular quick-pick pills --}}
+                        <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Pack size — exact rounds">
+                            <span class="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-subtle">Quick pick</span>
+                            @foreach ($packGranular as $value => $opt)
+                                @php
+                                    $on = $packaging === $value;
+                                    $muted = ($opt['count'] ?? null) === 0 && ! $on;
+                                @endphp
+                                <label class="cursor-pointer select-none">
+                                    <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                                    <span @class([
+                                        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums transition',
+                                        'border-accent bg-accent text-accent-fg' => $on,
+                                        'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' => ! $on && ! $muted,
+                                        'border-line/50 text-ink-subtle/60' => $muted,
+                                    ])>
+                                        {{ $opt['label'] }}
+                                        @if ($opt['count'] !== null)
+                                            <span class="rounded-full bg-black/10 px-1 text-[9px] dark:bg-white/15 {{ $muted ? 'opacity-50' : '' }}">{{ number_format($opt['count']) }}</span>
+                                        @endif
+                                    </span>
+                                </label>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     {{-- ---------------------------------------------------------------- --}}
@@ -660,17 +709,42 @@
             });
         });
 
-        // Collapsible filter accordions (CSS grid-rows transition).
-        form.querySelectorAll('[data-accordion]').forEach(function (section) {
+        // Collapsible filter accordions (CSS grid-rows transition), with
+        // single-open (accordion) behaviour: opening one collapses the rest.
+        var accordions = Array.prototype.slice.call(form.querySelectorAll('[data-accordion]'));
+
+        function setAccordion(section, open) {
+            var body = section.querySelector('[data-accordion-body]');
+            var trigger = section.querySelector('[data-accordion-trigger]');
+            var chevron = section.querySelector('[data-accordion-chevron]');
+            if (body) body.classList.toggle('is-open', open);
+            if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (chevron) chevron.classList.toggle('rotate-180', open);
+        }
+
+        // On load, honour single-open: if the server rendered more than one
+        // open (multiple active filters), keep only the last one expanded.
+        var openOnLoad = accordions.filter(function (s) {
+            var b = s.querySelector('[data-accordion-body]');
+            return b && b.classList.contains('is-open');
+        });
+        openOnLoad.slice(0, -1).forEach(function (s) { setAccordion(s, false); });
+
+        accordions.forEach(function (section) {
             var trigger = section.querySelector('[data-accordion-trigger]');
             var body = section.querySelector('[data-accordion-body]');
-            var chevron = section.querySelector('[data-accordion-chevron]');
             if (!trigger || !body) return;
 
             trigger.addEventListener('click', function () {
-                var open = body.classList.toggle('is-open');
-                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-                if (chevron) chevron.classList.toggle('rotate-180', open);
+                var willOpen = !body.classList.contains('is-open');
+
+                if (willOpen) {
+                    accordions.forEach(function (other) {
+                        if (other !== section) setAccordion(other, false);
+                    });
+                }
+
+                setAccordion(section, willOpen);
             });
         });
 
