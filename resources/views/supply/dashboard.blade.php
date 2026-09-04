@@ -208,29 +208,55 @@
             @endif
 
             {{-- Packaging / pack size --}}
+            @php
+                $packaging = (string) ($filters['packaging'] ?? 'all');
+                $bySize = $facets['packaging']['by_size'] ?? [];
+                $packOptions = [
+                    'all' => ['label' => 'All', 'count' => null],
+                    'standard' => ['label' => 'Standard Boxes', 'count' => $facets['packaging']['standard'] ?? null],
+                    'bulk' => ['label' => 'Bulk / Cases', 'count' => $facets['packaging']['bulk'] ?? null],
+                ];
+                $packGranular = [
+                    '20' => ['label' => '20', 'count' => $bySize[20] ?? null],
+                    '50' => ['label' => '50', 'count' => $bySize[50] ?? null],
+                    '100' => ['label' => '100', 'count' => $bySize[100] ?? null],
+                    '500' => ['label' => '500', 'count' => $bySize[500] ?? null],
+                    '1000' => ['label' => '1000+', 'count' => $bySize[1000] ?? null],
+                ];
+            @endphp
             <div class="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
                 Packaging
-                <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Pack size">
-                    @php
-                        $packaging = $filters['packaging'] ?? 'all';
-                        $packOptions = [
-                            'all' => ['label' => 'All', 'count' => null],
-                            'standard' => ['label' => 'Standard Boxes', 'count' => $facets['packaging']['standard'] ?? null],
-                            'bulk' => ['label' => 'Bulk / Cases', 'count' => $facets['packaging']['bulk'] ?? null],
-                        ];
-                    @endphp
-                    @foreach ($packOptions as $value => $opt)
-                        @php $on = $packaging === $value; @endphp
-                        <label class="cursor-pointer select-none">
-                            <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
-                            <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
-                                {{ $opt['label'] }}
-                                @if ($opt['count'] !== null)
-                                    <span class="rounded-full bg-black/10 px-1 text-[9px] tabular-nums dark:bg-white/15">{{ number_format($opt['count']) }}</span>
-                                @endif
-                            </span>
-                        </label>
-                    @endforeach
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <div class="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Pack size">
+                        @foreach ($packOptions as $value => $opt)
+                            @php $on = $packaging === $value; @endphp
+                            <label class="cursor-pointer select-none">
+                                <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                                <span class="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition {{ $on ? 'bg-accent text-accent-fg shadow-sm' : 'text-ink-muted hover:text-ink' }}">
+                                    {{ $opt['label'] }}
+                                    @if ($opt['count'] !== null)
+                                        <span class="rounded-full bg-black/10 px-1 text-[9px] tabular-nums dark:bg-white/15">{{ number_format($opt['count']) }}</span>
+                                    @endif
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
+
+                    {{-- Granular quick-size pills --}}
+                    <div class="inline-flex flex-wrap items-center gap-1" role="group" aria-label="Pack size — exact rounds">
+                        @foreach ($packGranular as $value => $opt)
+                            @php $on = $packaging === $value; @endphp
+                            <label class="cursor-pointer select-none">
+                                <input type="radio" name="packaging" value="{{ $value }}" @checked($on) class="peer sr-only" data-autosubmit>
+                                <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums transition {{ $on ? 'border-accent bg-accent text-accent-fg' : 'border-line text-ink-muted hover:bg-ink/5 hover:text-ink' }}">
+                                    {{ $opt['label'] }}
+                                    @if ($opt['count'] !== null)
+                                        <span class="rounded-full bg-black/10 px-1 text-[9px] dark:bg-white/15">{{ number_format($opt['count']) }}</span>
+                                    @endif
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
                 </div>
             </div>
 
@@ -440,14 +466,40 @@
                                                     {{ $offering['updated_at'] ? \Illuminate\Support\Carbon::parse($offering['updated_at'])->diffForHumans() : '—' }}
                                                 </td>
                                                 <td class="py-1 pr-3">
-                                                    @if ($offering['needs_review'])
-                                                        <span
-                                                            class="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
-                                                            title="{{ $offering['review_reason'] }}"
-                                                        >Review</span>
-                                                    @else
-                                                        <span class="text-[9px] text-ink-subtle">ok</span>
-                                                    @endif
+                                                    <span class="inline-flex items-center gap-1.5">
+                                                        @if ($offering['needs_review'])
+                                                            <span
+                                                                class="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                                                                title="{{ $offering['review_reason'] }}"
+                                                            >Review</span>
+                                                        @else
+                                                            <span class="text-[9px] text-ink-subtle">ok</span>
+                                                        @endif
+
+                                                        @if ($canResolve && ! $offering['needs_review'])
+                                                            {{-- Manual admin actions on a clean offering. --}}
+                                                            <details data-offering-menu class="relative">
+                                                                <summary class="cursor-pointer list-none rounded border border-line px-1.5 py-[1px] text-[9px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">Edit</summary>
+                                                                <div class="absolute right-0 z-20 mt-1 w-52 space-y-2 rounded-lg border border-line bg-surface p-2.5 text-left shadow-lg">
+                                                                    <label class="block text-[9px] font-semibold uppercase tracking-wider text-ink-subtle">
+                                                                        Correct round count
+                                                                        <input
+                                                                            type="number" name="round_count" min="1" max="5000"
+                                                                            value="{{ $offering['rounds_per_unit'] }}"
+                                                                            form="ammo-approve-{{ $offering['id'] }}"
+                                                                            class="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1 text-[12px] tabular-nums text-ink outline-none focus:border-accent dark:bg-surface-2">
+                                                                    </label>
+                                                                    <button type="submit" form="ammo-approve-{{ $offering['id'] }}"
+                                                                        class="w-full rounded-md bg-accent px-2 py-1 text-[11px] font-semibold text-accent-fg transition hover:opacity-90">Save correction</button>
+                                                                    <button type="submit" form="ammo-flag-{{ $offering['id'] }}"
+                                                                        class="w-full rounded-md border border-amber-500/40 px-2 py-1 text-[11px] font-medium text-amber-700 transition hover:bg-amber-500/10 dark:text-amber-300">Flag for review</button>
+                                                                    <button type="submit" form="ammo-ignore-{{ $offering['id'] }}"
+                                                                        onclick="return confirm('Ignore {{ $offering['sku'] }}? It will be hidden from the catalog and stay ignored on future feed imports.');"
+                                                                        class="w-full rounded-md border border-line px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:bg-ink/5 hover:text-ink">Ignore SKU</button>
+                                                                </div>
+                                                            </details>
+                                                        @endif
+                                                    </span>
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -533,8 +585,11 @@
 --}}
 @if ($canResolve)
     @php
-        $flaggedOfferings = collect($masters->items())
-            ->flatMap(fn ($m) => collect($m->offerings ?? [])->where('needs_review', true)->all());
+        // Every offering on the page gets a set of action forms so the
+        // drawer's inline "Edit" menu (on clean rows) and the flagged
+        // diagnostics panel can both submit without nesting forms.
+        $actionableOfferings = collect($masters->items())
+            ->flatMap(fn ($m) => collect($m->offerings ?? [])->all());
     @endphp
     <div hidden>
         @if ($filters['review'] === 'flagged')
@@ -545,8 +600,12 @@
             </form>
         @endif
 
-        @foreach ($flaggedOfferings as $offering)
+        @foreach ($actionableOfferings as $offering)
             <form id="ammo-approve-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.approve', $offering['id']) }}">
+                @csrf
+                @method('PATCH')
+            </form>
+            <form id="ammo-flag-{{ $offering['id'] }}" method="POST" action="{{ route('supply.offerings.flag', $offering['id']) }}">
                 @csrf
                 @method('PATCH')
             </form>

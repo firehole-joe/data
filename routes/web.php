@@ -96,6 +96,8 @@ Route::middleware('feed.admin')->group(function () {
     */
     Route::patch('/offerings/{offering}/approve', [SupplyReportController::class, 'approveOffering'])
         ->name('supply.offerings.approve');
+    Route::patch('/offerings/{offering}/flag', [SupplyReportController::class, 'flagOffering'])
+        ->name('supply.offerings.flag');
     Route::patch('/offerings/{offering}/ignore', [SupplyReportController::class, 'ignoreOffering'])
         ->name('supply.offerings.ignore');
     Route::post('/offerings/ignore-all', [SupplyReportController::class, 'ignoreAllOfferings'])

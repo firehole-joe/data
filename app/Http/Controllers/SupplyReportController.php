@@ -268,6 +268,27 @@ class SupplyReportController extends Controller
     }
 
     /**
+     * Manually push an otherwise-clean offering into the review queue
+     * from the dashboard drawer (`needs_review = true`). The optional
+     * `review_reason` records why; a blank one falls back to a generic
+     * "flagged by an administrator" note.
+     */
+    public function flagOffering(Request $request, DistributorProduct $offering)
+    {
+        $reason = trim((string) $request->input('review_reason'));
+
+        $offering->forceFill([
+            'needs_review' => true,
+            'review_reason' => $reason !== '' ? $reason : 'Manually flagged for review by an administrator.',
+            'is_ignored' => false,
+        ])->save();
+
+        return redirect()
+            ->back(fallback: route('supply.dashboard'))
+            ->with('success', 'Offering flagged — it is now in the review queue.');
+    }
+
+    /**
      * Bulk-dismiss every offering still flagged for review within the
      * active dashboard filter selection: each is marked `is_ignored`,
      * cleared of its review flag, and written to the durable override

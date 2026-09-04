@@ -369,7 +369,7 @@ class SupplyReportQueryService
      *     calibers: array<string, int>,
      *     projectile_types: array<string, int>,
      *     grain_weights: array<int, int>,
-     *     packaging: array{standard: int, bulk: int},
+     *     packaging: array{standard: int, bulk: int, by_size: array<int, int>},
      *     per_page_options: array<int, int>
      * }
      */
@@ -398,34 +398,55 @@ class SupplyReportQueryService
         ];
     }
 
+    /** Exact round counts surfaced as granular packaging quick-filter pills. */
+    public const PACKAGING_QUICK_SIZES = [20, 50, 100, 500, 1000];
+
     /**
-     * Distinct master-SKU counts for the Standard / Bulk packaging chips,
-     * evaluated against the active scope but with the packaging filter
-     * itself neutralised so a chip never collapses its own count.
+     * Distinct master-SKU counts for the packaging chips — the Standard
+     * / Bulk buckets and each granular quick-size pill — evaluated
+     * against the active scope but with the packaging filter itself
+     * neutralised so a chip never collapses its own count.
      *
-     * @return array{standard: int, bulk: int}
+     * `by_size` is keyed by the exact round count; the `1000` key is
+     * "1000 or more" to match {@see applyPackagingFilter()}.
+     *
+     * @return array{standard: int, bulk: int, by_size: array<int, int>}
      */
     private function packagingFacetCounts(array $filters): array
     {
         $scoped = array_merge($filters, ['packaging' => 'all']);
         $rounds = $this->effectiveRoundsExpr();
+        $mid = 'distributor_products.master_ammunition_id';
 
-        $row = $this->baseOfferingQuery($scoped)->toBase()
+        $query = $this->baseOfferingQuery($scoped)->toBase()
             ->selectRaw(
-                "COUNT(DISTINCT CASE WHEN {$rounds} > 0 AND {$rounds} <= ? "
-                .'THEN distributor_products.master_ammunition_id END) as standard_count',
+                "COUNT(DISTINCT CASE WHEN {$rounds} > 0 AND {$rounds} <= ? THEN {$mid} END) as standard_count",
                 [self::PACKAGING_STANDARD_MAX],
             )
             ->selectRaw(
-                "COUNT(DISTINCT CASE WHEN {$rounds} >= ? "
-                .'THEN distributor_products.master_ammunition_id END) as bulk_count',
+                "COUNT(DISTINCT CASE WHEN {$rounds} >= ? THEN {$mid} END) as bulk_count",
                 [self::PACKAGING_BULK_MIN],
-            )
-            ->first();
+            );
+
+        foreach (self::PACKAGING_QUICK_SIZES as $size) {
+            $operator = $size >= 1000 ? '>=' : '=';
+            $query->selectRaw(
+                "COUNT(DISTINCT CASE WHEN {$rounds} {$operator} ? THEN {$mid} END) as size_{$size}",
+                [$size],
+            );
+        }
+
+        $row = $query->first();
+
+        $bySize = [];
+        foreach (self::PACKAGING_QUICK_SIZES as $size) {
+            $bySize[$size] = (int) ($row->{"size_{$size}"} ?? 0);
+        }
 
         return [
             'standard' => (int) ($row->standard_count ?? 0),
             'bulk' => (int) ($row->bulk_count ?? 0),
+            'by_size' => $bySize,
         ];
     }
 
