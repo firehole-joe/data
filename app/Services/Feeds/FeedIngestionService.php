@@ -7,6 +7,7 @@ use App\Models\DistributorProduct;
 use App\Models\FeedRun;
 use App\Models\PriceHistory;
 use App\Services\Ammunition\AmmoAttributeExtractor;
+use App\Services\Ammunition\MasterRoundCountReconciler;
 use App\Services\Feeds\Contracts\FeedDriverInterface;
 use App\Services\Feeds\DTOs\FeedItemDTO;
 use App\Services\Matching\ProductMatchingService;
@@ -42,6 +43,7 @@ class FeedIngestionService
         private readonly AmmoAttributeExtractor $extractor,
         private readonly AmmoPricingGuardrail $guardrail,
         private readonly DistributorSkuOverrideManager $overrides,
+        private readonly MasterRoundCountReconciler $reconciler,
     ) {}
 
     public function ingest(Distributor $distributor, bool $dryRun = false): FeedRun
@@ -176,6 +178,18 @@ class FeedIngestionService
         $this->matchIngestedProduct($product);
         $this->applyPricingGuardrail($product);
 
+        // A case-pack SKU that shares a UPC with the retail boxes can pin
+        // the master to 500 / 1000; pull it back to the box count the
+        // other offerings agree on so the boxes stop dividing by a case.
+        $reconciled = $this->reconciler->reconcile($product->masterAmmunition);
+        if ($reconciled !== null) {
+            Log::channel('daily')->info('ammo.master.round_count.reconciled', [
+                'master_ammunition_id' => $product->master_ammunition_id,
+                'rounds_per_box' => $reconciled,
+                'triggered_by' => $product->distributor_sku,
+            ]);
+        }
+
         PriceHistory::updateOrCreate(
             [
                 'distributor_product_id' => $product->id,
@@ -286,16 +300,16 @@ class FeedIngestionService
             return;
         }
 
-        $roundCount = (int) ($approvedCount
-            ?? $product->round_count
-            ?? ($attributes['round_count_explicit']
-                ? $attributes['round_count']
-                : (($master && (int) $master->rounds_per_box > 0)
-                    ? (int) $master->rounds_per_box
-                    : $attributes['round_count'])));
+        // Independent per-offering round count: a hard signal (reviewer
+        // override or an explicit packaging count) is pinned to the row
+        // so a later master change can never re-poison this offering; a
+        // mere master / default fallback is left dynamic so a wrong
+        // master still trips the guardrail below.
+        $resolved = $this->reconciler->resolveRoundCount($product, $master, $approvedCount);
+        $roundCount = $resolved['count'];
 
-        if ($approvedCount !== null && (int) $product->round_count !== $approvedCount) {
-            $product->round_count = $approvedCount;
+        if ($resolved['confident'] && (int) $product->round_count !== $roundCount) {
+            $product->round_count = $roundCount;
         }
 
         $cpr = $this->extractor->costPerRound((float) $product->wholesale_price, $roundCount);

@@ -26,6 +26,15 @@ class AmmoPricingGuardrail
     public const TIER_DEFAULT = 'default';
 
     /**
+     * Absolute wholesale $/round floor for a centerfire pistol / rifle
+     * cartridge. A computed cost-per-round below this is not a cheap deal
+     * — it is a case count (500 / 1000) being divided into a box price.
+     * Such an offering is always flagged and never counts toward the
+     * "lowest price" rollups.
+     */
+    public const CENTERFIRE_HARD_FLOOR = 0.05;
+
+    /**
      * tier => [min $/round, max $/round]
      *
      * @var array<string, array{0: float, 1: float}>
@@ -112,6 +121,17 @@ class AmmoPricingGuardrail
         // reaches the market averages anyway.
         if ($wholesalePrice <= 0.0) {
             return $this->result(true, $cpr, null);
+        }
+
+        // Hard safety net, independent of the tier bounds: a centerfire
+        // pistol / rifle cartridge under the absolute floor is a
+        // case-count-as-box-count parse — always quarantine it.
+        if (in_array($tier, [self::TIER_HANDGUN, self::TIER_RIFLE], true)
+            && $cpr < self::CENTERFIRE_HARD_FLOOR) {
+            return $this->result(false, $cpr, sprintf(
+                '$%.4f/rd is below the $%.2f centerfire floor — likely a case count (%d) used as a box count (%s)',
+                $cpr, self::CENTERFIRE_HARD_FLOOR, $roundCount, $this->money($wholesalePrice),
+            ));
         }
 
         if ($cpr < $min) {

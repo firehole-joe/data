@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\DistributorProduct;
 use App\Models\MasterAmmunition;
 use App\Services\Ammunition\AmmoAttributeExtractor;
+use App\Services\Ammunition\MasterRoundCountReconciler;
 use App\Services\Feeds\AmmoPricingGuardrail;
 use App\Services\Feeds\DistributorSkuOverrideManager;
 use Illuminate\Console\Command;
@@ -31,6 +32,7 @@ class BackfillAmmoAttributesCommand extends Command
         AmmoAttributeExtractor $extractor,
         AmmoPricingGuardrail $guardrail,
         DistributorSkuOverrideManager $overrides,
+        MasterRoundCountReconciler $reconciler,
     ): int {
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
@@ -65,11 +67,15 @@ class BackfillAmmoAttributesCommand extends Command
             'cpr_set' => 0,
             'masters_enriched' => 0,
             'master_fields' => 0,
+            'masters_reconciled' => 0,
             'flagged' => 0,
             'cleared' => 0,
             'ignored' => 0,
             'overrides_applied' => 0,
         ];
+
+        /** @var array<int, true> $touchedMasters */
+        $touchedMasters = [];
 
         $bar = $this->output->createProgressBar($total);
         $bar->start();
@@ -77,12 +83,15 @@ class BackfillAmmoAttributesCommand extends Command
         $scope(DistributorProduct::query())
             ->with(['masterAmmunition', 'distributor'])
             ->orderBy('id')
-            ->chunkById($chunk, function ($products) use ($extractor, $guardrail, $overrides, $dryRun, $force, &$stats, $bar) {
+            ->chunkById($chunk, function ($products) use ($extractor, $guardrail, $overrides, $reconciler, $dryRun, $force, &$stats, &$touchedMasters, $bar) {
                 foreach ($products as $product) {
                     $stats['processed']++;
                     $bar->advance();
 
                     $master = $product->masterAmmunition;
+                    if ($master !== null) {
+                        $touchedMasters[$master->id] = true;
+                    }
                     $decision = $overrides->resolve($product);
 
                     // A ledgered "ignore" (by distributor SKU or by UPC)
@@ -134,20 +143,15 @@ class BackfillAmmoAttributesCommand extends Command
                         continue;
                     }
 
-                    // Otherwise an explicit packaging count from the
-                    // description / SKU (e.g. "50/1000" box/case slash
-                    // notation) is the most reliable signal and overrides a
-                    // possibly stale master.
-                    $roundCount = (int) ($approvedCount
-                        ?? $product->round_count
-                        ?? ($attributes['round_count_explicit']
-                            ? $attributes['round_count']
-                            : (($master && (int) $master->rounds_per_box > 0)
-                                ? (int) $master->rounds_per_box
-                                : $attributes['round_count'])));
+                    // A hard signal (reviewer override or an explicit
+                    // packaging count) is pinned to the offering row so a
+                    // later master change can never re-poison it; a mere
+                    // master / default fallback is left dynamic.
+                    $resolved = $reconciler->resolveRoundCount($product, $master, $approvedCount);
+                    $roundCount = $resolved['count'];
 
-                    if ($approvedCount !== null && ! $dryRun && (int) $product->round_count !== $approvedCount) {
-                        $product->forceFill(['round_count' => $approvedCount])->save();
+                    if ($resolved['confident'] && ! $dryRun && (int) $product->round_count !== $roundCount) {
+                        $product->forceFill(['round_count' => $roundCount])->save();
                     }
 
                     $cpr = $extractor->costPerRound((float) $product->wholesale_price, $roundCount);
@@ -214,6 +218,17 @@ class BackfillAmmoAttributesCommand extends Command
         $bar->finish();
         $this->newLine(2);
 
+        // A final pass: pull any master a case SKU had pinned to a case
+        // count back down to the box count its own offerings agree on.
+        if (! $dryRun) {
+            foreach (array_keys($touchedMasters) as $masterId) {
+                $master = MasterAmmunition::find($masterId);
+                if ($master !== null && $reconciler->reconcile($master) !== null) {
+                    $stats['masters_reconciled']++;
+                }
+            }
+        }
+
         $this->table(
             ['Metric', 'Count'],
             [
@@ -221,6 +236,7 @@ class BackfillAmmoAttributesCommand extends Command
                 ['Cost-per-round values written', number_format($stats['cpr_set'])],
                 ['Master records enriched', number_format($stats['masters_enriched'])],
                 ['Master fields filled', number_format($stats['master_fields'])],
+                ['Master round counts reconciled (case → box)', number_format($stats['masters_reconciled'])],
                 ['Approved overrides re-applied', number_format($stats['overrides_applied'])],
                 ['Ignored via override ledger', number_format($stats['ignored'])],
                 ['Flagged for review (price out of band)', number_format($stats['flagged'])],

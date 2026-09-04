@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
 use App\Models\MasterAmmunition;
+use App\Services\Ammunition\MasterRoundCountReconciler;
 use App\Services\Ammunition\SupplyReportQueryService;
 use App\Services\Feeds\DistributorSkuOverrideManager;
 use Illuminate\Http\Request;
@@ -184,6 +185,7 @@ class SupplyReportController extends Controller
         Request $request,
         DistributorProduct $offering,
         DistributorSkuOverrideManager $overrides,
+        MasterRoundCountReconciler $reconciler,
     ) {
         $validated = $request->validate([
             'round_count' => ['required', 'integer', 'min:1', 'max:5000'],
@@ -204,6 +206,12 @@ class SupplyReportController extends Controller
         // price / description snapshot so a later import only resurfaces
         // this listing if the data drifts materially.
         $overrides->recordApproved($offering, $roundCount);
+
+        // If a case SKU had pinned the shared master to a case count while
+        // this offering is a standard box, pull the master back to the
+        // box count so its sibling listings stop dividing by a case.
+        $offering->loadMissing('masterAmmunition');
+        $reconciler->reconcile($offering->masterAmmunition);
 
         return redirect()
             ->back(fallback: route('supply.dashboard'))
@@ -335,16 +343,31 @@ class SupplyReportController extends Controller
 
     private function lowestPricePerRound(string $caliber): ?float
     {
+        // Effective rounds-per-unit: the offering's own confirmed count,
+        // then its SKU override, and only then the master's box count —
+        // so a case SKU that poisoned the master to 1000 can never drag
+        // this figure to a fraction of a cent.
+        $rounds = 'COALESCE(distributor_products.round_count, '
+            .'NULLIF(distributor_sku_overrides.round_count, 0), master_ammunition.rounds_per_box)';
+
         $value = DistributorProduct::query()
             ->where('distributor_products.is_in_stock', true)
             ->where('distributor_products.wholesale_price', '>', 0)
+            // A flagged / dismissed offering carries a distrusted price
+            // and must never be the "lowest".
+            ->where('distributor_products.needs_review', false)
+            ->where('distributor_products.is_ignored', false)
             ->join('master_ammunition', 'master_ammunition.id', '=', 'distributor_products.master_ammunition_id')
+            ->leftJoin('distributor_sku_overrides', function ($join) {
+                $join->on('distributor_sku_overrides.distributor_id', '=', 'distributor_products.distributor_id')
+                    ->on('distributor_sku_overrides.distributor_sku', '=', 'distributor_products.distributor_sku');
+            })
             ->where('master_ammunition.caliber', $caliber)
             ->where('master_ammunition.is_tracked_in_report', true)
-            ->where('master_ammunition.rounds_per_box', '>', 0)
+            ->whereRaw("{$rounds} > 0")
             // `* 1.0` forces float division — SQLite would otherwise do
             // integer division when both operands land on whole numbers.
-            ->min(DB::raw('distributor_products.wholesale_price * 1.0 / master_ammunition.rounds_per_box'));
+            ->min(DB::raw("distributor_products.wholesale_price * 1.0 / {$rounds}"));
 
         return $value !== null ? round((float) $value, 4) : null;
     }

@@ -112,6 +112,25 @@ class AmmoPricingGuardrailTest extends TestCase
         }
     }
 
+    public function test_centerfire_below_the_hard_floor_is_flagged_as_a_case_count_parse(): void
+    {
+        // 9mm at $0.013/rd — a 1000-count case divided into a box price.
+        $result = $this->guardrail->validate(12.88, 1000, '9mm Luger');
+        $this->assertFalse($result['is_valid']);
+        $this->assertStringContainsString('centerfire floor', (string) $result['reason']);
+
+        // 5.56 at $0.02/rd — same story on the rifle tier.
+        $rifle = $this->guardrail->validate(20.00, 1000, '5.56x45mm NATO');
+        $this->assertFalse($rifle['is_valid']);
+        $this->assertStringContainsString('centerfire floor', (string) $rifle['reason']);
+
+        // A healthy centerfire box ($0.10/rd) is allowed through.
+        $this->assertTrue($this->guardrail->validate(5.00, 50, '9mm Luger')['is_valid']);
+
+        // Rimfire is exempt from the centerfire hard floor.
+        $this->assertTrue($this->guardrail->validate(10.00, 500, '.22 LR')['is_valid']);
+    }
+
     public function test_it_reports_the_computed_cost_per_round(): void
     {
         $this->assertEqualsWithDelta(0.2576, $this->guardrail->validate(12.88, 50, '9mm Luger')['cost_per_round'], 1e-9);

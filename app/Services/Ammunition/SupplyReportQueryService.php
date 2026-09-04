@@ -4,6 +4,7 @@ namespace App\Services\Ammunition;
 
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
+use App\Models\DistributorSkuOverride;
 use App\Models\MasterAmmunition;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -101,6 +102,13 @@ class SupplyReportQueryService
     {
         return DistributorProduct::query()
             ->join('master_ammunition', 'master_ammunition.id', '=', 'distributor_products.master_ammunition_id')
+            // 1:1 by the (distributor_id, distributor_sku) unique key, so
+            // the reviewer-confirmed count is available to the pricing
+            // aggregates without inflating any COUNT().
+            ->leftJoin('distributor_sku_overrides', function ($join) {
+                $join->on('distributor_sku_overrides.distributor_id', '=', 'distributor_products.distributor_id')
+                    ->on('distributor_sku_overrides.distributor_sku', '=', 'distributor_products.distributor_sku');
+            })
             ->where('master_ammunition.is_tracked_in_report', true)
             // Reviewer-dismissed offerings are held out of every dashboard
             // figure — the flagged view, the rollups and the stat cards.
@@ -146,9 +154,11 @@ class SupplyReportQueryService
         // Offerings flagged `needs_review` carry a distrusted price and are
         // held out of every priced aggregate so a bad parse never distorts
         // the market spread; they still count toward SKU / pipeline totals.
-        // A reviewer-confirmed per-offering `round_count` overrides the
-        // master's rounds-per-box for pricing; NULL falls back to it.
-        $rounds = 'COALESCE(distributor_products.round_count, master_ammunition.rounds_per_box)';
+        // Effective rounds-per-unit, most trusted first: the offering's
+        // own confirmed count, then its SKU override, and only then the
+        // master's box count (which a case SKU can have poisoned).
+        $rounds = 'COALESCE(distributor_products.round_count, '
+            .'NULLIF(distributor_sku_overrides.round_count, 0), master_ammunition.rounds_per_box)';
         $priced = 'distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review';
         $pricedCpr = $priced." AND {$rounds} > 0";
         $cprExpr = "distributor_products.wholesale_price * 1.0 / {$rounds}";
@@ -217,7 +227,8 @@ class SupplyReportQueryService
         // `needs_review` offerings are excluded from the best-price / best-CPR
         // aggregates (their price is distrusted) but still contribute to the
         // aggregate quantity.
-        $rounds = 'COALESCE(distributor_products.round_count, master_ammunition.rounds_per_box)';
+        $rounds = 'COALESCE(distributor_products.round_count, '
+            .'NULLIF(distributor_sku_overrides.round_count, 0), master_ammunition.rounds_per_box)';
         $bestPriceExpr = 'MIN(CASE WHEN distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review THEN distributor_products.wholesale_price END)';
         $bestCprExpr = "MIN(CASE WHEN distributor_products.wholesale_price > 0 AND NOT distributor_products.needs_review AND {$rounds} > 0 THEN distributor_products.wholesale_price * 1.0 / {$rounds} END)";
         $totalQtyExpr = 'COALESCE(SUM(distributor_products.quantity_available), 0)';
@@ -271,10 +282,12 @@ class SupplyReportQueryService
             ->get()
             ->keyBy('id');
 
+        $overrides = $this->overrideCountsFor($masters);
+
         $rows = collect($orderedIds)
             ->map(fn ($id) => $masters->get($id))
             ->filter()
-            ->each(fn (MasterAmmunition $master) => $this->decorate($master))
+            ->each(fn (MasterAmmunition $master) => $this->decorate($master, $overrides))
             ->values();
 
         $paginator->setCollection($rows);
@@ -413,7 +426,10 @@ class SupplyReportQueryService
             ->when($filters['min_qty'] > 0, fn ($sub) => $sub->where('quantity_available', '>=', $filters['min_qty']));
     }
 
-    private function decorate(MasterAmmunition $master): void
+    /**
+     * @param  array<string, int>  $overrideCounts  "{distributor_id}:{sku}" => confirmed round count
+     */
+    private function decorate(MasterAmmunition $master, array $overrideCounts = []): void
     {
         $listings = $master->distributorProducts;
 
@@ -424,9 +440,18 @@ class SupplyReportQueryService
         $best = ($priced->isNotEmpty() ? $priced : $trustworthy)->sortBy('wholesale_price')->first();
         $roundsPerBox = (int) $master->rounds_per_box;
 
-        // Effective rounds-per-unit for a listing: a reviewer-confirmed
-        // per-offering count when present, otherwise the master's.
-        $effectiveRounds = fn ($l): int => (int) ($l->round_count ?: $roundsPerBox);
+        // Effective rounds-per-unit for a listing, most trusted first:
+        // the offering's own confirmed count, then its SKU override, then
+        // the master's box count.
+        $effectiveRounds = function ($l) use ($roundsPerBox, $overrideCounts): int {
+            if ((int) $l->round_count > 0) {
+                return (int) $l->round_count;
+            }
+
+            $override = $overrideCounts[$l->distributor_id.':'.$l->distributor_sku] ?? 0;
+
+            return $override > 0 ? $override : $roundsPerBox;
+        };
         $bestRounds = $best ? $effectiveRounds($best) : 0;
 
         $master->best_price_per_box = $best ? (float) $best->wholesale_price : null;
@@ -462,6 +487,35 @@ class SupplyReportQueryService
             'review_reason' => $l->review_reason,
             'updated_at' => $l->last_feed_update_at,
         ])->values();
+    }
+
+    /**
+     * Confirmed round counts from the SKU-override ledger for the given
+     * masters' listings, keyed "{distributor_id}:{sku}".
+     *
+     * @param  \Illuminate\Support\Collection<int, MasterAmmunition>  $masters
+     * @return array<string, int>
+     */
+    private function overrideCountsFor($masters): array
+    {
+        $pairs = $masters
+            ->flatMap(fn (MasterAmmunition $m) => $m->distributorProducts)
+            ->map(fn ($l) => [$l->distributor_id, (string) $l->distributor_sku])
+            ->filter(fn ($p) => $p[0] !== null && $p[1] !== '')
+            ->values();
+
+        if ($pairs->isEmpty()) {
+            return [];
+        }
+
+        return DistributorSkuOverride::query()
+            ->where('is_ignored', false)
+            ->where('round_count', '>', 0)
+            ->whereIn('distributor_id', $pairs->pluck(0)->unique()->all())
+            ->whereIn('distributor_sku', $pairs->pluck(1)->unique()->all())
+            ->get(['distributor_id', 'distributor_sku', 'round_count'])
+            ->mapWithKeys(fn ($o) => [$o->distributor_id.':'.$o->distributor_sku => (int) $o->round_count])
+            ->all();
     }
 
     /**
