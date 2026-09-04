@@ -113,6 +113,7 @@
                 ];
                 if (auth()->user()?->isAdmin()) {
                     $nav[] = ['label' => 'Distributors & Feed Health', 'route' => 'supply.distributors'];
+                    $nav[] = ['label' => 'Users', 'route' => 'admin.users.index'];
                 }
             @endphp
             <nav class="hidden items-center gap-1 sm:flex" aria-label="Primary">

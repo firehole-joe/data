@@ -61,6 +61,10 @@
                     class="rounded-lg bg-teal-500 px-5 py-2.5 text-[13px] font-semibold text-teal-950 transition hover:bg-teal-400">
                     Secure Access
                 </a>
+                <a href="https://firehole.com" target="_blank" rel="noopener noreferrer"
+                    class="rounded-lg border border-zinc-700 px-5 py-2.5 text-[13px] font-semibold text-stone-300 transition hover:border-zinc-500 hover:text-stone-100">
+                    Visit Firehole.com
+                </a>
                 <span class="text-[12px] text-stone-500">Authorized personnel only.</span>
             </div>
 

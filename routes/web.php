@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\NewPasswordController;
@@ -40,10 +41,16 @@ Route::get('/report', [SupplyReportController::class, 'index'])->name('supply.in
 Route::get('/dashboard', [SupplyReportController::class, 'dashboard'])->name('supply.dashboard');
 
 /*
-| Distributors & Feed Health — feed administrators only.
+| Feed administrators only.
 */
-Route::middleware('admin')->group(function () {
+Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/distributors', [SupplyReportController::class, 'distributors'])->name('supply.distributors');
+
+    // Account roster management.
+    Route::get('/admin/users', [UserController::class, 'index'])->name('admin.users.index');
+    Route::post('/admin/users', [UserController::class, 'store'])->name('admin.users.store');
+    Route::put('/admin/users/{user}', [UserController::class, 'update'])->name('admin.users.update');
+    Route::delete('/admin/users/{user}', [UserController::class, 'destroy'])->name('admin.users.destroy');
 });
 
 /*
