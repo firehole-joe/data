@@ -91,7 +91,7 @@ class DavidsonsFeedDriverTest extends TestCase
         $skus = array_map(fn (FeedItemDTO $dto) => $dto->distributor_sku, $this->parse());
 
         $this->assertSame(
-            ['DAV-PMC223', 'DAV-FED9', 'DAV-FED9-CASE', 'DAV-HOR65', 'DAV-WIN12', 'DAV-EDGE9', 'DAV-NOQTY'],
+            ['DAV-PMC223', 'DAV-FED9', 'DAV-FED9-CASE', 'DAV-HOR65', 'DAV-WIN12', 'DAV-EDGE9', 'DAV-NOQTY', 'DAV-PMC9BX'],
             $skus,
         );
         $this->assertNotContains('DAV-SPR-HC', $skus, 'a handgun must be filtered out');
@@ -192,15 +192,28 @@ class DavidsonsFeedDriverTest extends TestCase
         $this->assertSame(5, $this->bySku('DAV-WIN12')->raw_round_count);
     }
 
-    public function test_box_per_case_multiplies_round_per_box_for_a_case_sku(): void
+    public function test_box_per_case_multiplies_round_per_box_only_for_a_genuine_case_level_sku(): void
     {
-        // round_per_box=50, box_per_case=20 -> a 1000-round case, kept
-        // independent of the 50-round box sharing the same UPC.
+        // round_per_box=50, box_per_case=20, and the description says
+        // "Case" -> a genuine 1000-round case, kept independent of the
+        // 50-round box sharing the same UPC.
         $case = $this->bySku('DAV-FED9-CASE');
         $box = $this->bySku('DAV-FED9');
 
         $this->assertSame(1000, $case->raw_round_count);
         $this->assertSame(50, $box->raw_round_count);
         $this->assertSame($case->raw_upc, $box->raw_upc, 'the case and box share a UPC');
+    }
+
+    public function test_box_per_case_alone_does_not_multiply_a_plain_retail_box(): void
+    {
+        // Reported bug: round_per_box=50, box_per_case=10, DealerPrice
+        // $13.50 for a single box with no "Case"/"CS" marker and a price
+        // nowhere near a case threshold. box_per_case is shipping/carton
+        // metadata only — the round count must stay 50, not 500.
+        $dto = $this->bySku('DAV-PMC9BX');
+
+        $this->assertSame(50, $dto->raw_round_count);
+        $this->assertSame(13.50, $dto->wholesale_price);
     }
 }

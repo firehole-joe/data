@@ -3,6 +3,9 @@
 namespace App\Services\Feeds\Drivers;
 
 use App\Models\Distributor;
+use App\Services\Ammunition\AmmoAttributeExtractor;
+use App\Services\Ammunition\MasterRoundCountReconciler;
+use App\Services\Feeds\AmmoPricingGuardrail;
 use App\Services\Feeds\DTOs\FeedItemDTO;
 use League\Flysystem\Filesystem;
 use RuntimeException;
@@ -45,6 +48,13 @@ class DavidsonsFeedDriver extends AbstractFeedDriver
 
     /** Header aliases (normalised) that identify the on-hand quantity column in V2_Qty.csv. */
     private const QTY_ALIASES = ['qtyonhand', 'quantityonhand', 'qty', 'quantity', 'onhand', 'available'];
+
+    public function __construct(
+        private readonly MasterRoundCountReconciler $reconciler = new MasterRoundCountReconciler(
+            new AmmoAttributeExtractor,
+            new AmmoPricingGuardrail,
+        ),
+    ) {}
 
     protected function feedSlug(): string
     {
@@ -139,6 +149,12 @@ class DavidsonsFeedDriver extends AbstractFeedDriver
 
         $dealerPrice = $this->toFloat($this->pick($row, $columns, ['dealerprice']));
         $salePrice = $this->toNullableFloat($this->pick($row, $columns, ['saleprice']));
+        // "Use sale price if present and > 0, otherwise DealerPrice" — and
+        // never let a mispriced sale exceed the dealer cost.
+        $wholesalePrice = $salePrice !== null ? min($salePrice, $dealerPrice) : $dealerPrice;
+
+        $roundPerBoxRaw = $this->pick($row, $columns, ['roundperbox']);
+        $boxPerCaseRaw = $this->pick($row, $columns, ['boxpercase']);
 
         return FeedItemDTO::fromArray([
             'distributor_sku' => $itemNo,
@@ -147,19 +163,31 @@ class DavidsonsFeedDriver extends AbstractFeedDriver
                 'mpn', 'manufacturerpartnumber', 'mfgpartno', 'model', 'modelnumber', 'partnumber',
             ]),
             'raw_description' => $description,
-            // "Use sale price if present and > 0, otherwise DealerPrice" —
-            // and never let a mispriced sale exceed the dealer cost.
-            'wholesale_price' => $salePrice !== null ? min($salePrice, $dealerPrice) : $dealerPrice,
+            'wholesale_price' => $wholesalePrice,
             'map_price' => null,
             'msrp_price' => null,
             'quantity_available' => $this->toInt($this->pick($row, $columns, [self::MERGED_QTY_HEADER])),
-            'raw_round_count' => $this->resolveRoundsPerUnit($row, $columns),
+            'raw_round_count' => $this->resolveRoundsPerUnit(
+                $roundPerBoxRaw,
+                $boxPerCaseRaw,
+                $this->pick($row, $columns, ['qtypercase']),
+                $itemNo,
+                $description,
+                $wholesalePrice,
+                $ammoCaliber,
+            ),
             'raw_payload' => [
                 'brand' => $brand,
                 'ammo_cat' => $ammoCat,
                 'ammo_caliber' => $ammoCaliber,
                 'bullet_weight' => $bulletWeight,
                 'bullet_type' => $bulletType,
+                // Kept verbatim for debugging; `distributor_products` has
+                // no raw-payload column, so this does not persist past the
+                // DTO — a later repair re-derives the count from
+                // raw_description / the master instead, not from here.
+                'round_per_box' => $roundPerBoxRaw,
+                'box_per_case' => $boxPerCaseRaw,
                 'cells' => $row,
             ],
         ]);
@@ -213,36 +241,52 @@ class DavidsonsFeedDriver extends AbstractFeedDriver
     }
 
     /**
-     * The true rounds-per-unit for this row, independent of any other
-     * offering that might share its UPC.
+     * The true rounds-per-unit for THIS row's own `DealerPrice`.
      *
-     * `round_per_box` is the rounds in one retail box. For a case-level
-     * SKU (`box_per_case` > 1 — the sellable unit is a case of that many
-     * boxes) the row's true count is `round_per_box * box_per_case`, so
-     * a case row's own wholesale price never divides by a lone box's
-     * count. This is what keeps a case SKU from poisoning a shared
-     * master's `rounds_per_box` the way an unstructured description
-     * parse can (see {@see \App\Services\Ammunition\MasterRoundCountReconciler}).
+     * `DealerPrice` prices a single retail box — `round_per_box` is
+     * therefore the authoritative count for a normal row and is trusted
+     * directly. `box_per_case` is shipping/carton packaging metadata
+     * (how many boxes fit in a master carton) and is **never** used as a
+     * multiplier just because it is present and greater than 1 — doing
+     * so was the bug: a $13.50 / 50-round box with `box_per_case = 10`
+     * was getting stamped `round_count = 500`, computing ~$0.027/rd and
+     * getting flagged as a bogus case-count-as-box-count parse.
      *
-     * @param  array<int, string>  $row
-     * @param  array<string, int>  $columns
+     * The count is only multiplied by `box_per_case` when this specific
+     * row is itself a genuine case-level SKU — its own SKU/description
+     * says so ("Case", "CS", "Case Pack", ...), or its price clears the
+     * case-pricing threshold for a centerfire pistol/rifle cartridge —
+     * in which case `DealerPrice` really is priced per case and
+     * `round_per_box * box_per_case` reconstructs the case's true round
+     * count. That judgment reuses
+     * {@see MasterRoundCountReconciler::isCasePack()} so "is this a
+     * case" is decided the same way everywhere in the pipeline.
      */
-    private function resolveRoundsPerUnit(array $row, array $columns): ?int
-    {
-        $roundPerBox = $this->toNullableFloat($this->pick($row, $columns, ['roundperbox']));
-        $boxPerCase = $this->toNullableFloat($this->pick($row, $columns, ['boxpercase']));
-
-        if ($roundPerBox !== null && $boxPerCase !== null && $boxPerCase > 1) {
-            return (int) round($roundPerBox * $boxPerCase);
-        }
+    private function resolveRoundsPerUnit(
+        ?string $roundPerBoxRaw,
+        ?string $boxPerCaseRaw,
+        ?string $qtyPerCaseRaw,
+        string $itemNo,
+        string $description,
+        float $wholesalePrice,
+        ?string $caliber,
+    ): ?int {
+        $roundPerBox = $this->toNullableFloat($roundPerBoxRaw);
 
         if ($roundPerBox !== null) {
-            return (int) round($roundPerBox);
+            $boxPerCase = $this->toNullableFloat($boxPerCaseRaw);
+
+            $isCaseLevelSku = $boxPerCase !== null && $boxPerCase > 1
+                && $this->reconciler->isCasePack($itemNo, $description, $wholesalePrice, $caliber);
+
+            return $isCaseLevelSku
+                ? (int) round($roundPerBox * $boxPerCase)
+                : (int) round($roundPerBox);
         }
 
         // No per-box figure at all: QtyPerCase is sometimes the only
         // packaging cue Davidson's supplies for a case-level SKU.
-        $qtyPerCase = $this->toNullableFloat($this->pick($row, $columns, ['qtypercase']));
+        $qtyPerCase = $this->toNullableFloat($qtyPerCaseRaw);
 
         return $qtyPerCase !== null ? (int) round($qtyPerCase) : null;
     }
