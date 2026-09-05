@@ -13,8 +13,9 @@ use Illuminate\Support\Str;
  *
  * Matching hierarchy:
  *   1. exact UPC
- *   2. [manufacturer, mfr_part_number] (manufacturer parsed from the
- *      description, part number taken from the raw feed value)
+ *   2. [manufacturer, mfr_part_number] (manufacturer from the feed's own
+ *      brand column when it has one, else parsed from the description;
+ *      part number taken from the raw feed value)
  *   3. auto-create from the parsed description (optional)
  */
 class ProductMatchingService
@@ -59,7 +60,13 @@ class ProductMatchingService
 
         $parsed = $this->parser->parse((string) $product->raw_description, (string) $product->distributor_sku);
 
-        $manufacturer = $parsed['manufacturer'];
+        // Prefer the feed's own brand column over a description guess:
+        // "Unknown" masters are overwhelmingly rows whose description
+        // never named a brand the parser recognises.
+        $manufacturer = $this->parser->canonicalBrand(
+            $product->raw_manufacturer,
+            (string) $product->raw_description,
+        );
         $partNumber = $this->cleanString($product->raw_mfr_part_number);
 
         // Tier 2 — [manufacturer, mfr_part_number].
@@ -77,7 +84,7 @@ class ProductMatchingService
         }
 
         // Tier 3 — auto-create from the parsed description.
-        if ($autoCreate && $this->hasEnoughToCreate($parsed, $partNumber)) {
+        if ($autoCreate && $this->hasEnoughToCreate($parsed, $manufacturer, $partNumber)) {
             $master = $this->createMaster($product, $parsed, $manufacturer, $partNumber);
 
             $this->stats[$master->wasRecentlyCreated ? 'created' : 'matched_mpn']++;
@@ -158,10 +165,10 @@ class ProductMatchingService
     /**
      * @param  array<string, mixed>  $parsed
      */
-    private function hasEnoughToCreate(array $parsed, ?string $partNumber): bool
+    private function hasEnoughToCreate(array $parsed, ?string $manufacturer, ?string $partNumber): bool
     {
         return $parsed['caliber'] !== null
-            || ($parsed['manufacturer'] !== null && $partNumber !== null);
+            || ($manufacturer !== null && $partNumber !== null);
     }
 
     /**

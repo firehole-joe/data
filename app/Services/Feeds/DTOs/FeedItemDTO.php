@@ -17,6 +17,9 @@ class FeedItemDTO
      *                                 this row (e.g. Davidson's `round_per_box`), independent of whatever
      *                                 the shared master record says. Null when the feed carries no such
      *                                 column and the round count must be inferred from the description.
+     * @param  ?string  $raw_manufacturer  The brand / manufacturer string the feed states in its own
+     *                                     column (e.g. Zanders' `MFG`), before any canonicalisation.
+     *                                     Null when the feed carries no manufacturer column.
      */
     public function __construct(
         public string $distributor_sku,
@@ -30,6 +33,7 @@ class FeedItemDTO
         public bool $is_in_stock,
         public array $raw_payload = [],
         public ?int $raw_round_count = null,
+        public ?string $raw_manufacturer = null,
     ) {}
 
     /**
@@ -58,6 +62,7 @@ class FeedItemDTO
                 : $quantity > 0,
             raw_payload: (array) ($data['raw_payload'] ?? []),
             raw_round_count: self::nullablePositiveInt($data['raw_round_count'] ?? null),
+            raw_manufacturer: self::nullableString($data['raw_manufacturer'] ?? null),
         );
     }
 
@@ -70,6 +75,7 @@ class FeedItemDTO
             'distributor_sku' => $this->distributor_sku,
             'raw_upc' => $this->raw_upc,
             'raw_mfr_part_number' => $this->raw_mfr_part_number,
+            'raw_manufacturer' => $this->raw_manufacturer,
             'raw_description' => $this->raw_description,
             'wholesale_price' => $this->wholesale_price,
             'map_price' => $this->map_price,

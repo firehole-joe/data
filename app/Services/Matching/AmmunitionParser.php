@@ -79,9 +79,11 @@ class AmmunitionParser
      */
     private const MANUFACTURER_PATTERNS = [
         ['Sellier & Bellot', '/\bsellier\b|\bs\s*&\s*b\b/'],
+        ['Prvi Partizan', '/\bprvi\s*partizan\b|\bppu\b/'],
+        ['Black Hills', '/\bblack\s*hills\b/'],
         ['Sig Sauer', '/\bsig\s*sauer\b|\bsig\b/'],
         ['Federal', '/\bfederal\b|\bfed\b|american\s*eagle/'],
-        ['Hornady', '/\bhornady\b|\bhrndy\b/'],
+        ['Hornady', '/\bhornady\b|\bhrndy\b|\bhrdy\b|\bfrontier\b/'],
         ['Winchester', '/\bwinchester\b|\bwwb\b|\bwin\b/'],
         ['Remington', '/\bremington\b|\bumc\b|core-?lokt/'],
         ['Speer', '/\bspeer\b|gold\s*dot/'],
@@ -92,6 +94,36 @@ class AmmunitionParser
         ['Magtech', '/\bmagtech\b|\bcbc\b/'],
         ['Aguila', '/\baguila\b/'],
         ['Barnes', '/\bbarnes\b/'],
+        ['Nosler', '/\bnosler\b/'],
+        ['Norma', '/\bnorma\b/'],
+        ['Browning', '/\bbrowning\b/'],
+        ['Wolf', '/\bwolf\b/'],
+        ['Tula', '/\btula(?:ammo)?\b/'],
+        ['Armscor', '/\barmscor\b|rock\s*island/'],
+        ['Underwood', '/\bunderwood\b/'],
+        ['Buffalo Bore', '/\bbuffalo\s*bore\b/'],
+        ['Corbon', '/\bcor-?bon\b/'],
+        ['Weatherby', '/\bweatherby\b/'],
+        ['GECO', '/\bgeco\b/'],
+        ['Igman', '/\bigman\b/'],
+        ['Sterling', '/\bsterling\b/'],
+        ['Ammo Inc', '/\bammo\s*inc\b|\bstreak\b/'],
+        ['Independence', '/\bindependence\b/'],
+        ['Monarch', '/\bmonarch\b/'],
+    ];
+
+    /**
+     * Manufacturer-column values that carry no real brand — a feed's way
+     * of saying "house / remanufactured / mixed headstamp". Compared
+     * against the normalised value in {@see canonicalBrand()}.
+     *
+     * @var array<int, string>
+     */
+    private const NON_BRAND_VALUES = [
+        'unknown', 'n/a', 'na', 'none', 'null', 'various', 'assorted',
+        'mixed', 'misc', 'miscellaneous', 'generic', 'other', 'no brand',
+        'nobrand', 'tbd', 'default', 'house', 'reman', 'remanufactured',
+        'reman ammo', 'reclaimed', 'range brass', 'mixed headstamp',
     ];
 
     /**
@@ -206,6 +238,83 @@ class AmmunitionParser
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the best canonical brand for a feed row, preferring the
+     * feed's own manufacturer column over anything guessed from text.
+     *
+     * Order of preference:
+     *   1. the feed's manufacturer column, mapped to a canonical brand
+     *      (or cleaned up and title-cased when it is a legitimate but
+     *      unrecognised name);
+     *   2. a brand named anywhere in the description — for the feeds that
+     *      lead their description with the brand ("FEDERAL AMMO 9MM …")
+     *      this is exactly the leading-word heuristic;
+     *   3. null, so the caller can fall back to its own "Unknown"
+     *      placeholder.
+     *
+     * A junk column value ("Mixed", "Reman", "N/A") is ignored at step 1
+     * and the description is consulted instead.
+     */
+    public function canonicalBrand(?string $feedValue, string $description = ''): ?string
+    {
+        return $this->normalizeBrandValue($feedValue)
+            ?? $this->parseManufacturer($description);
+    }
+
+    /**
+     * Canonicalise a raw manufacturer-column value: map a known brand
+     * name or abbreviation to its canonical label, otherwise title-case
+     * a clean, plausible brand name as-is. Junk values
+     * ({@see self::NON_BRAND_VALUES}) and SKU-ish / free-text fragments
+     * return null.
+     */
+    private function normalizeBrandValue(?string $value): ?string
+    {
+        $value = trim(preg_replace('/\s+/', ' ', (string) $value) ?? '');
+        if ($value === '') {
+            return null;
+        }
+
+        $canonical = $this->parseManufacturer($value);
+        if ($canonical !== null) {
+            return $canonical;
+        }
+
+        if (in_array($this->normalize($value), self::NON_BRAND_VALUES, true)) {
+            return null;
+        }
+
+        // A plausible brand is one to three words of letters, digits and
+        // the punctuation that shows up in real names (&, -, ., '). This
+        // rejects part numbers and free-text description fragments.
+        if (! preg_match('/^\p{L}[\p{L}\d&.\x27-]*(?: [\p{L}\d&.\x27-]+){0,2}$/u', $value)) {
+            return null;
+        }
+
+        return $this->titleCaseBrand($value);
+    }
+
+    /**
+     * Title-case a brand name while keeping short all-caps tokens (PMC,
+     * PPU, CCI) and a lone ampersand intact.
+     */
+    private function titleCaseBrand(string $value): string
+    {
+        $words = array_map(static function (string $word): string {
+            if ($word === '&') {
+                return '&';
+            }
+
+            if (preg_match('/^[\p{Lu}\d]{2,4}$/u', $word)) {
+                return $word;
+            }
+
+            return ucfirst(mb_strtolower($word));
+        }, explode(' ', $value));
+
+        return implode(' ', $words);
     }
 
     private function defaultRoundsPerBox(?string $caliber): int

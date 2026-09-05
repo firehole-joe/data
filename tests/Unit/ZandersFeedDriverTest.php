@@ -20,14 +20,14 @@ class ZandersFeedDriverTest extends TestCase
     /**
      * @return array<int, FeedItemDTO>
      */
-    private function parse(): array
+    private function parse(?string $fixture = null): array
     {
-        return iterator_to_array((new ZandersFeedDriver)->parseFeed($this->fixture), false);
+        return iterator_to_array((new ZandersFeedDriver)->parseFeed($fixture ?? $this->fixture), false);
     }
 
-    private function bySku(string $sku): FeedItemDTO
+    private function bySku(string $sku, ?string $fixture = null): FeedItemDTO
     {
-        foreach ($this->parse() as $dto) {
+        foreach ($this->parse($fixture) as $dto) {
             if ($dto->distributor_sku === $sku) {
                 return $dto;
             }
@@ -63,5 +63,20 @@ class ZandersFeedDriverTest extends TestCase
 
         $this->assertSame(0, $dto->quantity_available);
         $this->assertFalse($dto->is_in_stock);
+    }
+
+    public function test_it_leaves_raw_manufacturer_null_when_the_legacy_feed_has_no_mfg_column(): void
+    {
+        $this->assertNull($this->bySku('Z-CCI9MM')->raw_manufacturer);
+    }
+
+    public function test_it_maps_the_mfg_column_to_raw_manufacturer_on_the_modern_layout(): void
+    {
+        $modern = dirname(__DIR__).'/Fixtures/zandersinv_sample.csv';
+
+        $this->assertSame('CCI', $this->bySku('ZAN-CCI9MM', $modern)->raw_manufacturer);
+        $this->assertSame('Federal', $this->bySku('ZAN-FED556', $modern)->raw_manufacturer);
+        // The MFG column carries a brand the joined description never names.
+        $this->assertSame('PPU', $this->bySku('ZAN-PPU9', $modern)->raw_manufacturer);
     }
 }

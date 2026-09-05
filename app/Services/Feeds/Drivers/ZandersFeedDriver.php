@@ -80,7 +80,9 @@ class ZandersFeedDriver extends AbstractFeedDriver
 
         $description = $this->zandersDescription($row, $columns);
         $category = $this->pick($row, $columns, self::CATEGORY_ALIASES, 1);
-        $manufacturer = $this->pick($row, $columns, ['mfg', 'manufacturer', 'brand', 'mfgname']);
+        $manufacturer = $this->pick($row, $columns, [
+            'mfg', 'manufacturer', 'brand', 'mfgname', 'make', 'vendor', 'mfr', 'mfrname', 'mfgr',
+        ]);
 
         if (! $this->rowIsAmmunition($category, trim(($manufacturer ?? '').' '.$description))) {
             return null;
@@ -95,6 +97,7 @@ class ZandersFeedDriver extends AbstractFeedDriver
                 'mfgpnum', 'mfgpartnum', 'mpn', 'manufacturerpartnumber', 'mfgpart',
                 'mfgpartno', 'model', 'modelnumber', 'partnumber',
             ], 6),
+            'raw_manufacturer' => $manufacturer,
             'raw_description' => $description,
             'wholesale_price' => $this->toFloat($this->pick($row, $columns, [
                 'price1', 'price', 'dealerprice', 'cost', 'wholesale', 'wholesaleprice', 'yourprice', 'dealercost',

@@ -22,6 +22,7 @@ class DistributorProduct extends Model
         'distributor_sku',
         'raw_upc',
         'raw_mfr_part_number',
+        'raw_manufacturer',
         'raw_description',
         'wholesale_price',
         'cost_per_round',

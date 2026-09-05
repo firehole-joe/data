@@ -81,6 +81,7 @@ class FeedItemDTOTest extends TestCase
             'distributor_sku' => 'SKU1',
             'raw_upc' => null,
             'raw_mfr_part_number' => null,
+            'raw_manufacturer' => null,
             'raw_description' => 'desc',
             'wholesale_price' => 1.23,
             'map_price' => null,

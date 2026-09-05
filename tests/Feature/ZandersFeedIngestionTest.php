@@ -79,7 +79,7 @@ class ZandersFeedIngestionTest extends TestCase
             ->all();
 
         $this->assertSame(
-            ['ZAN-CCI22', 'ZAN-CCI9MM', 'ZAN-FED556', 'ZAN-MT308', 'ZAN-PMC45', 'ZAN-RECLAIM9'],
+            ['ZAN-CCI22', 'ZAN-CCI9MM', 'ZAN-FED556', 'ZAN-MT308', 'ZAN-PMC45', 'ZAN-PPU9', 'ZAN-RECLAIM9'],
             $skus,
         );
         $this->assertDatabaseMissing('distributor_products', ['distributor_sku' => 'ZAN-GLK19']);
@@ -100,6 +100,37 @@ class ZandersFeedIngestionTest extends TestCase
         $this->assertEqualsWithDelta(9.10, (float) $offering->wholesale_price, 0.001, 'Price1 -> wholesale');
         $this->assertSame(300, $offering->quantity_available, 'Avail -> quantity');
         $this->assertTrue((bool) $offering->is_in_stock);
+    }
+
+    public function test_it_stores_the_feed_manufacturer_column_on_the_offering(): void
+    {
+        $zanders = $this->zanders();
+
+        $this->ingest($zanders);
+
+        $this->assertSame(
+            'Federal',
+            DistributorProduct::where('distributor_sku', 'ZAN-FED556')->value('raw_manufacturer'),
+        );
+        $this->assertSame(
+            'PPU',
+            DistributorProduct::where('distributor_sku', 'ZAN-PPU9')->value('raw_manufacturer'),
+        );
+    }
+
+    public function test_the_mfg_column_brands_a_master_whose_description_names_no_brand(): void
+    {
+        $zanders = $this->zanders();
+
+        $this->ingest($zanders);
+
+        // "Tac-Load 9mm Luger 124gr FMJ 50rd" carries no recognisable
+        // brand — only the feed's MFG column ("PPU") does.
+        $offering = DistributorProduct::where('distributor_sku', 'ZAN-PPU9')->firstOrFail();
+
+        $this->assertNotNull($offering->master_ammunition_id);
+        $this->assertSame('Prvi Partizan', $offering->masterAmmunition->manufacturer);
+        $this->assertNotSame('Unknown', $offering->masterAmmunition->manufacturer);
     }
 
     public function test_zero_avail_is_recorded_as_out_of_stock(): void
@@ -254,7 +285,7 @@ class ZandersFeedIngestionTest extends TestCase
 
         $this->artisan('feed:sync', ['slug' => 'zanders'])->assertExitCode(0);
 
-        $this->assertSame(6, DistributorProduct::where('distributor_sku', 'like', 'ZAN-%')->count());
+        $this->assertSame(7, DistributorProduct::where('distributor_sku', 'like', 'ZAN-%')->count());
         $this->assertDatabaseHas('feed_runs', ['status' => 'completed']);
     }
 

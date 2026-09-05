@@ -209,6 +209,12 @@ class AmmunitionParserTest extends TestCase
             'Sellier & Bellot' => ['S&B 9MM 115GR FMJ', 'Sellier & Bellot'],
             'Barnes' => ['BARNES VOR-TX 300BLK 110GR', 'Barnes'],
             'Sig Sauer' => ['SIG SAUER ELITE 9MM 124GR', 'Sig Sauer'],
+            'Prvi Partizan' => ['PRVI PARTIZAN 7.62X39 123GR FMJ', 'Prvi Partizan'],
+            'PPU abbreviation' => ['PPU 9MM 115GR FMJ 50RD', 'Prvi Partizan'],
+            'Norma' => ['NORMA TAC-9 9MM 115GR FMJ', 'Norma'],
+            'Nosler' => ['NOSLER MATCH GRADE 6.5CM 140GR', 'Nosler'],
+            'Black Hills' => ['BLACK HILLS 5.56 77GR OTM', 'Black Hills'],
+            'Armscor / Rock Island' => ['ROCK ISLAND 45 ACP 230GR FMJ', 'Armscor'],
             'unknown' => ['Generic ammo can, 30 cal', null],
         ];
     }
@@ -219,6 +225,43 @@ class AmmunitionParserTest extends TestCase
     public function test_it_identifies_manufacturer(string $raw, ?string $expected): void
     {
         $this->assertSame($expected, $this->parser->parseManufacturer($raw));
+    }
+
+    /**
+     * @return array<string, array{0: ?string, 1: string, 2: ?string}>
+     */
+    public static function canonicalBrandProvider(): array
+    {
+        return [
+            // Feed column recognised → canonical label.
+            'column: CCI' => ['CCI', 'Blazer Brass 9mm 115gr FMJ', 'CCI'],
+            'column: Federal' => ['Federal', 'American Eagle 9mm 115gr', 'Federal'],
+            'column: PPU abbrev' => ['PPU', 'Tac-Load 9mm 124gr FMJ', 'Prvi Partizan'],
+            'column: S&B' => ['S&B', '9mm 115gr FMJ', 'Sellier & Bellot'],
+            // Feed column unrecognised but clean → title-cased as-is.
+            'column: clean unknown name' => ['Steinel', 'Steinel 9mm 147gr', 'Steinel'],
+            'column: preserves acronym' => ['SBR', 'SBR 300 BLK 220gr', 'SBR'],
+            // Feed column is junk → fall through to the description.
+            'column junk falls to description' => ['Mixed', 'FEDERAL AMMO 9MM 115GR FMJ', 'Federal'],
+            'column blank falls to description' => ['', 'WINCHESTER USA 5.56 55GR', 'Winchester'],
+            'column N/A falls to description' => ['N/A', 'HORNADY 6.5 CREEDMOOR 140GR ELD', 'Hornady'],
+            // Nothing usable anywhere.
+            'nothing resolvable' => ['Reman', 'Reclaimed range brass, mixed headstamp', null],
+            'null column, unbranded description' => [null, 'Generic training ammo 9mm', null],
+            // Description-prefix heuristic (leading word is the brand).
+            'description prefix only' => [null, 'REMINGTON UMC 45 AUTO 230GR FMJ', 'Remington'],
+        ];
+    }
+
+    /**
+     * @dataProvider canonicalBrandProvider
+     */
+    public function test_canonical_brand_prefers_the_feed_column_then_the_description(
+        ?string $feedValue,
+        string $description,
+        ?string $expected,
+    ): void {
+        $this->assertSame($expected, $this->parser->canonicalBrand($feedValue, $description));
     }
 
     public function test_parse_returns_a_complete_structured_bag(): void

@@ -197,6 +197,49 @@ class ProductMatchingTest extends TestCase
         $this->assertSame(1000, $master->rounds_per_box);
     }
 
+    public function test_tier_3_brands_the_new_master_from_the_feed_manufacturer_column(): void
+    {
+        // Description names no brand the parser knows; the feed's own
+        // manufacturer column does.
+        $product = $this->product([
+            'raw_upc' => null,
+            'raw_mfr_part_number' => 'PP9MM',
+            'raw_manufacturer' => 'PPU',
+            'raw_description' => 'Tac-Load 9mm Luger 124gr FMJ 50rd',
+        ]);
+
+        $result = $this->matcher->matchProduct($product);
+
+        $this->assertNotNull($result);
+        $this->assertTrue($result->wasRecentlyCreated);
+        $this->assertSame('Prvi Partizan', $result->manufacturer);
+        $this->assertNotSame('Unknown', $result->manufacturer);
+        $this->assertSame('9mm Luger', $result->caliber);
+    }
+
+    public function test_tier_2_matches_on_the_feed_manufacturer_column(): void
+    {
+        $master = $this->master([
+            'upc' => null,
+            'manufacturer' => 'Prvi Partizan',
+            'mfr_part_number' => 'PP9MM',
+            'caliber' => '9mm Luger',
+        ]);
+
+        $product = $this->product([
+            'raw_upc' => null,
+            'raw_mfr_part_number' => 'PP9MM',
+            'raw_manufacturer' => 'PPU',
+            'raw_description' => 'Tac-Load 9mm Luger 124gr FMJ 50rd',
+        ]);
+
+        $result = $this->matcher->matchProduct($product);
+
+        $this->assertSame($master->id, $result?->id);
+        $this->assertSame(1, $this->matcher->getStats()['matched_mpn']);
+        $this->assertSame(1, MasterAmmunition::count());
+    }
+
     public function test_tier_3_is_skipped_when_auto_create_is_disabled(): void
     {
         $product = $this->product([

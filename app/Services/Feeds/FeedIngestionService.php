@@ -30,6 +30,7 @@ class FeedIngestionService
     private const TRACKED_COLUMNS = [
         'raw_upc',
         'raw_mfr_part_number',
+        'raw_manufacturer',
         'raw_description',
         'wholesale_price',
         'map_price',
@@ -162,6 +163,7 @@ class FeedIngestionService
         $product->fill([
             'raw_upc' => $dto->raw_upc,
             'raw_mfr_part_number' => $dto->raw_mfr_part_number,
+            'raw_manufacturer' => $dto->raw_manufacturer,
             'raw_description' => $dto->raw_description,
             'wholesale_price' => $dto->wholesale_price,
             'map_price' => $dto->map_price,
