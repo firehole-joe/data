@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MasterAmmunition extends Model
@@ -52,6 +53,24 @@ class MasterAmmunition extends Model
     public function distributorProducts(): HasMany
     {
         return $this->hasMany(DistributorProduct::class);
+    }
+
+    /**
+     * The brand's ownership / country-of-origin classification, matched
+     * on the manufacturer name. Null when the brand is unclassified.
+     */
+    public function brandProvenance(): BelongsTo
+    {
+        return $this->belongsTo(BrandProvenance::class, 'manufacturer', 'brand_name');
+    }
+
+    /**
+     * The provenance tier string for this record's brand, or null when
+     * the brand has no `brand_provenances` entry.
+     */
+    public function getProvenanceAttribute(): ?string
+    {
+        return $this->brandProvenance?->provenance;
     }
 
     /**

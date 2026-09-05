@@ -2,6 +2,7 @@
 
 namespace App\Services\Ammunition;
 
+use App\Models\BrandProvenance;
 use App\Models\Distributor;
 use App\Models\DistributorProduct;
 use App\Models\DistributorSkuOverride;
@@ -666,96 +667,193 @@ class SupplyReportQueryService
     /* ------------------------------------------------------------------ */
 
     /**
+     * The ball / target-ammunition `bullet_type` values the public
+     * supply-summary API counts, applied identically to all five caliber
+     * groups so the 2026 Supply Report tracks one consistent
+     * training-ammo definition.
+     *
+     * `FMJ` full metal jacket, `TMJ` total metal / copper-plated target
+     * rounds, and `FP` flat-point ball. `SP` (soft point) and `JHP` /
+     * `HP` (hollow point) are deliberately excluded — the report is pure
+     * target/training ball ammo, not hunting or defensive loads.
+     *
+     * @var array<int, string>
+     */
+    public const PUBLIC_API_BALL_BULLET_TYPES = ['FMJ', 'TMJ', 'FP'];
+
+    /**
      * Caliber groups exposed by the public supply-summary API: the
      * canonical `master_ammunition.caliber` value(s) each display label
-     * covers, and the FMJ-focused `bullet_type` values counted toward it.
-     *
-     * `.223 Remington` is folded into "5.56 NATO" (commercially
-     * interchangeable FMJ training loads). `.357 Magnum` additionally
-     * allows `SP` (jacketed soft point — AmmoAttributeExtractor's
-     * canonical label for "JSP") since that, alongside FMJ, is the
-     * standard training/target load for that caliber.
+     * covers. `.223 Remington` is folded into "5.56 NATO" (commercially
+     * interchangeable ball loads). Every group uses the same
+     * {@see self::PUBLIC_API_BALL_BULLET_TYPES} allow-list.
      *
      * @var array<string, array{calibers: array<int, string>, bullet_types: array<int, string>}>
      */
     public const PUBLIC_API_CALIBER_GROUPS = [
         '9mm Luger' => [
             'calibers' => ['9mm Luger'],
-            'bullet_types' => ['FMJ'],
+            'bullet_types' => self::PUBLIC_API_BALL_BULLET_TYPES,
         ],
         '5.56 NATO' => [
             'calibers' => ['5.56x45mm NATO', '.223 Remington'],
-            'bullet_types' => ['FMJ'],
+            'bullet_types' => self::PUBLIC_API_BALL_BULLET_TYPES,
         ],
         '.300 AAC Blackout' => [
             'calibers' => ['.300 AAC Blackout'],
-            'bullet_types' => ['FMJ'],
+            'bullet_types' => self::PUBLIC_API_BALL_BULLET_TYPES,
         ],
         '.45 ACP' => [
             'calibers' => ['.45 ACP'],
-            'bullet_types' => ['FMJ'],
+            'bullet_types' => self::PUBLIC_API_BALL_BULLET_TYPES,
         ],
         '.357 Magnum' => [
             'calibers' => ['.357 Magnum'],
-            'bullet_types' => ['FMJ', 'SP'],
+            'bullet_types' => self::PUBLIC_API_BALL_BULLET_TYPES,
         ],
     ];
 
     /**
      * The full payload behind `GET /api/v1/supply-summary`: a standard
      * retail-box (<= 50 rd) breakdown and a bulk/case (>= 100 rd)
-     * breakdown for each FMJ-focused caliber group in
-     * {@see self::PUBLIC_API_CALIBER_GROUPS}.
+     * breakdown for each ball-ammo caliber group in
+     * {@see self::PUBLIC_API_CALIBER_GROUPS}, plus a root-level
+     * `unclassified_brands` diagnostic.
      *
-     * @return array{calibers: array<string, mixed>, bulk_offerings: array<string, mixed>}
+     * Recognised `$options`:
+     *  - `min_stock_units` (int, default 0): drop any offering with
+     *    `quantity_available` below this before every count / price.
+     *  - `provenance_filter` (?string): one of {@see BrandProvenance::TIERS};
+     *    restricts every figure to brands in that tier and excludes
+     *    unclassified brands entirely.
+     *  - `include_provenance_breakdown` (bool, default false): nest a
+     *    `provenance_breakdown` object in each caliber block splitting the
+     *    standard-box stats three ways by provenance tier (unclassified
+     *    brands fall into none of the three).
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{calibers: array<string, mixed>, bulk_offerings: array<string, mixed>, unclassified_brands: array<int, string>}
      */
-    public function publicApiSummary(): array
+    public function publicApiSummary(array $options = []): array
     {
+        $minStock = max(0, (int) ($options['min_stock_units'] ?? 0));
+        $provenanceFilter = $this->validProvenanceFilter($options['provenance_filter'] ?? null);
+        $includeBreakdown = (bool) ($options['include_provenance_breakdown'] ?? false);
+
         $calibers = [];
         $bulk = [];
 
         foreach (self::PUBLIC_API_CALIBER_GROUPS as $label => $group) {
-            $calibers[$label] = $this->publicStandardBoxSummary($group['calibers'], $group['bullet_types']);
-            $bulk[$label] = $this->publicBulkSummary($group['calibers'], $group['bullet_types']);
+            $calibers[$label] = $this->publicStandardBoxSummary(
+                $group['calibers'],
+                $group['bullet_types'],
+                $minStock,
+                $provenanceFilter,
+                $includeBreakdown,
+            );
+            $bulk[$label] = $this->publicBulkSummary(
+                $group['calibers'],
+                $group['bullet_types'],
+                $minStock,
+                $provenanceFilter,
+            );
         }
 
         return [
             'calibers' => $calibers,
             'bulk_offerings' => $bulk,
+            'unclassified_brands' => $this->publicApiUnclassifiedBrands(),
         ];
     }
 
     /**
+     * Only a recognised provenance tier survives; anything else (a typo,
+     * an empty string, null) resolves to "no provenance filter".
+     */
+    private function validProvenanceFilter(mixed $value): ?string
+    {
+        return is_string($value) && in_array($value, BrandProvenance::TIERS, true) ? $value : null;
+    }
+
+    /**
      * The base offering scope for one public-API caliber group: every
-     * default (unfiltered) offering for the given calibers and
-     * FMJ-focused bullet types. A flagged offering carries a distrusted
-     * price and must never surface in a public report.
+     * clean, tracked offering for the given calibers and ball bullet
+     * types, left-joined to `brand_provenances` on the brand name so a
+     * provenance tier can be filtered or grouped downstream.
+     *
+     * `$minStock` drops thin inventory; `$provenanceFilter`, when set,
+     * both restricts to that tier and (because the match is on a
+     * non-null `brand_provenances.provenance`) excludes every
+     * unclassified brand.
      *
      * @param  array<int, string>  $calibers
      * @param  array<int, string>  $bulletTypes
      */
-    private function publicApiOfferingQuery(array $calibers, array $bulletTypes): Builder
-    {
-        return $this->baseOfferingQuery($this->normalizeFilters(new Request))
+    private function publicApiOfferingQuery(
+        array $calibers,
+        array $bulletTypes,
+        int $minStock = 0,
+        ?string $provenanceFilter = null,
+    ): Builder {
+        $query = $this->baseOfferingQuery($this->normalizeFilters(new Request))
+            ->leftJoin('brand_provenances', function ($join) {
+                $join->whereRaw('LOWER(brand_provenances.brand_name) = LOWER(master_ammunition.manufacturer)');
+            })
             ->whereIn('master_ammunition.caliber', $calibers)
             ->whereIn('master_ammunition.bullet_type', $bulletTypes)
             ->where('distributor_products.needs_review', false);
+
+        if ($minStock > 0) {
+            $query->where('distributor_products.quantity_available', '>=', $minStock);
+        }
+
+        if ($provenanceFilter !== null) {
+            $query->where('brand_provenances.provenance', $provenanceFilter);
+        }
+
+        return $query;
     }
 
     /**
      * Standard-box (<= 50 rd) stats for one caliber group: catalog /
      * stock counts across every tracked SKU, and pricing derived only
-     * from the in-stock, priced subset.
+     * from the in-stock, priced subset. With `$includeBreakdown` a
+     * `provenance_breakdown` object is appended (see
+     * {@see self::publicProvenanceBreakdown()}).
      *
      * @param  array<int, string>  $calibers
      * @param  array<int, string>  $bulletTypes
      * @return array<string, mixed>
      */
-    private function publicStandardBoxSummary(array $calibers, array $bulletTypes): array
-    {
-        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes);
+    private function publicStandardBoxSummary(
+        array $calibers,
+        array $bulletTypes,
+        int $minStock,
+        ?string $provenanceFilter,
+        bool $includeBreakdown,
+    ): array {
+        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes, $minStock, $provenanceFilter);
         $this->applyPackagingFilter($base, 'standard');
 
+        $summary = $this->standardBoxAggregate($base, withBestValue: true);
+
+        if ($includeBreakdown) {
+            $summary['provenance_breakdown'] = $this->publicProvenanceBreakdown($calibers, $bulletTypes, $minStock);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * The shared standard-box aggregate: catalog / stock counts, in-stock
+     * percentage, floor and average cost-per-round, and (when
+     * `$withBestValue`) the cheapest in-stock offering. Every figure is
+     * derived from whatever scope `$base` already carries.
+     *
+     * @return array<string, mixed>
+     */
+    private function standardBoxAggregate(Builder $base, bool $withBestValue): array
+    {
         $total = (clone $base)->toBase()->count();
         $inStock = (clone $base)->toBase()->where('distributor_products.quantity_available', '>', 0)->count();
         $outOfStock = max(0, $total - $inStock);
@@ -774,23 +872,56 @@ class SupplyReportQueryService
             ->selectRaw("AVG({$cprExpr}) as avg_cpr")
             ->first();
 
-        $best = (clone $priced)
-            ->select('distributor_products.*')
-            ->selectRaw("{$rounds} as effective_round_count")
-            ->selectRaw("{$cprExpr} as computed_cpr")
-            ->with(['distributor', 'masterAmmunition'])
-            ->orderByRaw("{$cprExpr} asc")
-            ->first();
-
-        return [
+        $result = [
             'total_catalog_offerings' => $total,
             'in_stock_count' => $inStock,
             'out_of_stock_count' => $outOfStock,
             'in_stock_percentage' => number_format($percentage, 1).'%',
             'lowest_cost_per_round' => $this->cprPair($agg->min_cpr ?? null),
             'average_cost_per_round' => $this->cprPair($agg->avg_cpr ?? null),
-            'best_value_offering' => $best ? $this->publicOfferingSummary($best, includeSpecs: true) : null,
         ];
+
+        if ($withBestValue) {
+            $best = (clone $priced)
+                ->select('distributor_products.*')
+                ->selectRaw("{$rounds} as effective_round_count")
+                ->selectRaw("{$cprExpr} as computed_cpr")
+                ->with(['distributor', 'masterAmmunition'])
+                ->orderByRaw("{$cprExpr} asc")
+                ->first();
+
+            $result['best_value_offering'] = $best ? $this->publicOfferingSummary($best, includeSpecs: true) : null;
+        }
+
+        return $result;
+    }
+
+    /**
+     * The standard-box stats split three ways by provenance tier.
+     *
+     * Deliberately independent of any active `provenance_filter` — the
+     * whole point is the full three-way view — but `min_stock_units`
+     * still applies. Unclassified brands (no `brand_provenances` row)
+     * match none of the three tiers and are silently absent from every
+     * one, never folded into a tier.
+     *
+     * @param  array<int, string>  $calibers
+     * @param  array<int, string>  $bulletTypes
+     * @return array<string, array<string, mixed>>
+     */
+    private function publicProvenanceBreakdown(array $calibers, array $bulletTypes, int $minStock): array
+    {
+        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes, $minStock, null);
+        $this->applyPackagingFilter($base, 'standard');
+
+        $out = [];
+
+        foreach (BrandProvenance::TIERS as $tier) {
+            $tierBase = (clone $base)->where('brand_provenances.provenance', $tier);
+            $out[$tier] = $this->standardBoxAggregate($tierBase, withBestValue: false);
+        }
+
+        return $out;
     }
 
     /**
@@ -801,9 +932,13 @@ class SupplyReportQueryService
      * @param  array<int, string>  $bulletTypes
      * @return array<string, mixed>
      */
-    private function publicBulkSummary(array $calibers, array $bulletTypes): array
-    {
-        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes);
+    private function publicBulkSummary(
+        array $calibers,
+        array $bulletTypes,
+        int $minStock,
+        ?string $provenanceFilter,
+    ): array {
+        $base = $this->publicApiOfferingQuery($calibers, $bulletTypes, $minStock, $provenanceFilter);
         $this->applyPackagingFilter($base, 'bulk');
         $base->where('distributor_products.quantity_available', '>', 0);
 
@@ -831,6 +966,46 @@ class SupplyReportQueryService
             'lowest_bulk_cost_per_round' => $this->cprPair($min),
             'top_bulk_deal' => $topDeal ? $this->publicOfferingSummary($topDeal, includeSpecs: false) : null,
         ];
+    }
+
+    /**
+     * Distinct brand names present in clean, in-stock ball-ammo offerings
+     * across the five report calibers that have no `brand_provenances`
+     * entry — a data-quality signal for "these still need classifying".
+     *
+     * Independent of `min_stock_units` / `provenance_filter`: it always
+     * reports against live inventory so the list does not shrink just
+     * because a caller filtered hard. The literal "Unknown" placeholder
+     * and blank brands are not reported.
+     *
+     * @return array<int, string>
+     */
+    private function publicApiUnclassifiedBrands(): array
+    {
+        $calibers = collect(self::PUBLIC_API_CALIBER_GROUPS)
+            ->pluck('calibers')
+            ->flatten()
+            ->unique()
+            ->values()
+            ->all();
+
+        return $this->baseOfferingQuery($this->normalizeFilters(new Request))
+            ->leftJoin('brand_provenances', function ($join) {
+                $join->whereRaw('LOWER(brand_provenances.brand_name) = LOWER(master_ammunition.manufacturer)');
+            })
+            ->whereIn('master_ammunition.caliber', $calibers)
+            ->whereIn('master_ammunition.bullet_type', self::PUBLIC_API_BALL_BULLET_TYPES)
+            ->where('distributor_products.needs_review', false)
+            ->where('distributor_products.quantity_available', '>', 0)
+            ->whereNull('brand_provenances.id')
+            ->whereNotNull('master_ammunition.manufacturer')
+            ->whereRaw("TRIM(master_ammunition.manufacturer) <> ''")
+            ->whereRaw('LOWER(master_ammunition.manufacturer) <> ?', ['unknown'])
+            ->toBase()
+            ->distinct()
+            ->orderBy('master_ammunition.manufacturer')
+            ->pluck('master_ammunition.manufacturer')
+            ->all();
     }
 
     /**

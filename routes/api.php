@@ -27,4 +27,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 Route::middleware('supply_report.api_key')->prefix('v1')->group(function () {
     Route::get('/supply-summary', [PublicSupplyReportController::class, 'summary'])
         ->name('api.supply-summary');
+
+    Route::get('/brand-provenance', [PublicSupplyReportController::class, 'brandProvenance'])
+        ->name('api.brand-provenance');
 });

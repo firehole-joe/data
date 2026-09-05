@@ -117,12 +117,21 @@ class AuthAndAccessControlTest extends TestCase
         $this->assertStringContainsString('text/plain', $response->headers->get('Content-Type'));
     }
 
-    public function test_committed_public_robots_file_also_disallows_everything(): void
+    public function test_committed_public_robots_file_disallows_the_app_but_allows_the_public_api(): void
     {
+        $robots = str_replace("\r\n", "\n", (string) file_get_contents(public_path('robots.txt')));
+
         $this->assertSame(
-            "User-agent: *\nDisallow: /\n",
-            str_replace("\r\n", "\n", file_get_contents(public_path('robots.txt'))),
+            "User-agent: *\n"
+            ."Allow: /api/v1/supply-summary\n"
+            ."Disallow: /dashboard\n"
+            ."Disallow: /report\n"
+            ."Disallow: /\n",
+            $robots,
         );
+
+        // The catch-all still shields everything that is not explicitly allowed.
+        $this->assertStringContainsString("\nDisallow: /\n", $robots);
     }
 
     public function test_x_robots_tag_header_is_present_on_every_response(): void
